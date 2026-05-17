@@ -1,257 +1,260 @@
-import { Layers, Users, Mail, Send, Workflow, Eye, Pencil, MoreHorizontal, Sparkles } from 'lucide-react';
+import { Eye, Pencil, MoreHorizontal, Plus, ArrowUpRight } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { SegmentCreationPanel } from '@/components/SegmentCreationPanel';
 import { cn } from '@/lib/utils';
-import type { Segment, Sequence, Sender } from '@/lib/types';
+import type { Lead, LifecycleState, Segment, Sequence, Sender } from '@/lib/types';
 
 interface SegmentsViewProps {
+  leads: Lead[];
   segments: Segment[];
   sequences: Sequence[];
   senders: Sender[];
+  state: LifecycleState;
+  onAddSegment: (s: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => void;
   onJumpToLeads?: (segmentId: string) => void;
 }
 
-export function SegmentsView({ segments, sequences, senders, onJumpToLeads }: SegmentsViewProps) {
+type StatusKey = 'draft' | 'scheduled' | 'sending' | 'paused' | 'done' | 'fallback';
+
+const statusMeta: Record<StatusKey, { label: string; tone: string; dotTone: string }> = {
+  draft: { label: 'Draft', tone: 'text-muted-foreground', dotTone: 'bg-muted-foreground' },
+  scheduled: { label: 'Scheduled', tone: 'text-warning', dotTone: 'bg-warning' },
+  sending: { label: 'Sending', tone: 'text-success', dotTone: 'bg-success' },
+  paused: { label: 'Paused', tone: 'text-warning', dotTone: 'bg-warning' },
+  done: { label: 'Done', tone: 'text-muted-foreground', dotTone: 'bg-muted-foreground/60' },
+  fallback: { label: '—', tone: 'text-muted-foreground/70', dotTone: 'bg-muted-foreground/30' },
+};
+
+function statusFor(segment: Segment, state: LifecycleState, sendersCount: number): StatusKey {
+  if (segment.isDefault) return 'fallback';
+  if (state === 'finished') return 'done';
+  if (state === 'paused') return 'paused';
+  if (state === 'running' || state === 'partial') {
+    return sendersCount > 0 ? 'sending' : 'scheduled';
+  }
+  // setup state
+  return sendersCount > 0 ? 'scheduled' : 'draft';
+}
+
+export function SegmentsView({
+  leads,
+  segments,
+  sequences,
+  senders,
+  state,
+  onAddSegment,
+  onJumpToLeads,
+}: SegmentsViewProps) {
+  const [panelOpen, setPanelOpen] = useState(false);
+
   const customSegments = segments.filter((s) => !s.isDefault);
   const defaultSegment = segments.find((s) => s.isDefault);
   const totalLeads = segments.reduce((sum, s) => sum + s.matchedLeadIds.length, 0);
 
+  const rows: Segment[] = [...customSegments];
+  if (defaultSegment) rows.push(defaultSegment);
+
   return (
-    <div className="space-y-5 p-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Segments
+    <>
+      <div className="space-y-4 p-6">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Segments
+            </div>
+            <h1 className="mt-1 text-xl font-semibold text-foreground">
+              {customSegments.length} custom segment{customSegments.length === 1 ? '' : 's'}{' '}
+              <span className="text-base font-normal text-muted-foreground">
+                routing {totalLeads} lead{totalLeads === 1 ? '' : 's'}
+              </span>
+            </h1>
           </div>
-          <h1 className="mt-1 text-xl font-semibold text-foreground">
-            {customSegments.length} custom segment{customSegments.length === 1 ? '' : 's'}{' '}
-            <span className="text-base font-normal text-muted-foreground">
-              routing {totalLeads} lead{totalLeads === 1 ? '' : 's'}
-            </span>
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Each segment is a group of leads that gets its own message flow and senders. Leads belong to exactly one segment.
-            Anything not matched falls into the Unassigned fallback.
-          </p>
+          <Button onClick={() => setPanelOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New segment
+          </Button>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30 text-xs uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-2.5 text-left font-medium">Segment</th>
+                <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-right font-medium">Leads</th>
+                <th className="px-4 py-2.5 text-left font-medium">Message flow</th>
+                <th className="px-4 py-2.5 text-left font-medium">Senders</th>
+                <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                <th className="px-4 py-2.5 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No segments yet.{' '}
+                    <button
+                      onClick={() => setPanelOpen(true)}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      Create your first segment
+                    </button>
+                  </td>
+                </tr>
+              ) : (
+                rows.map((seg) => (
+                  <SegmentRow
+                    key={seg.id}
+                    segment={seg}
+                    sequences={sequences}
+                    senders={senders}
+                    state={state}
+                    onJumpToLeads={onJumpToLeads}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-md border border-dashed border-border bg-secondary/30 px-4 py-2.5 text-xs text-muted-foreground">
+          <span className="text-foreground">Coming next:</span> per-segment launch state, in-row edit, and live progress
+          (sent / opened / replied) per segment.
         </div>
       </div>
 
-      {customSegments.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="grid gap-3">
-          {customSegments.map((seg) => (
-            <SegmentCard
-              key={seg.id}
-              segment={seg}
-              sequences={sequences}
-              senders={senders}
-              onJumpToLeads={onJumpToLeads}
-            />
-          ))}
-        </div>
-      )}
-
-      {defaultSegment && (
-        <div className="pt-2">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Fallback
-          </div>
-          <SegmentCard
-            segment={defaultSegment}
-            sequences={sequences}
-            senders={senders}
-            onJumpToLeads={onJumpToLeads}
-          />
-        </div>
-      )}
-
-      <div className="rounded-lg border border-dashed border-border bg-secondary/30 px-4 py-3 text-xs text-muted-foreground">
-        <span className="text-foreground">Coming next:</span> per-segment launch state (Draft / Live / Paused),
-        editing existing segments, single-lead unassign, and per-segment progress.
-      </div>
-    </div>
+      <SegmentCreationPanel
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        leads={leads}
+        sequences={sequences}
+        senders={senders}
+        existingSegments={segments}
+        onSave={(seg, resolution) => {
+          onAddSegment(seg, resolution);
+          setPanelOpen(false);
+        }}
+      />
+    </>
   );
 }
 
-function SegmentCard({
+function SegmentRow({
   segment,
   sequences,
   senders,
+  state,
   onJumpToLeads,
 }: {
   segment: Segment;
   sequences: Sequence[];
   senders: Sender[];
+  state: LifecycleState;
   onJumpToLeads?: (segmentId: string) => void;
 }) {
   const sequence = sequences.find((s) => s.id === segment.sequenceId);
-  const segmentSenderCount = segment.segmentSenderIds?.length ?? 0;
   const isDefault = segment.isDefault;
+  const senderMode = segment.senderMode;
+  const sendersCount =
+    senderMode === 'campaign-pool' ? senders.length : segment.segmentSenderIds?.length ?? 0;
+  const status = statusFor(segment, state, sendersCount);
+  const s = statusMeta[status];
 
   return (
-    <div
-      className={cn(
-        'group rounded-xl border bg-card p-4 transition-colors',
-        isDefault ? 'border-border/60' : 'border-border hover:border-primary/40',
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        {/* Left: name + status + lead count */}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={cn('inline-flex items-center gap-1.5 text-base font-semibold', isDefault ? 'text-muted-foreground' : 'text-foreground')}>
-              {!isDefault && <span className="h-2 w-2 rounded-full bg-primary" />}
-              {segment.name}
-            </span>
-            {isDefault ? (
-              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                Fallback bucket
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
-                <Sparkles className="h-2.5 w-2.5" />
-                Configured
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Users className="h-3 w-3" />
-              {segment.matchedLeadIds.length} lead{segment.matchedLeadIds.length === 1 ? '' : 's'}
-            </span>
-          </div>
-
-          {/* Three info chips: Flow / Senders / Variants */}
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <InfoChip
-              Icon={Workflow}
-              label="Message flow"
-              value={sequence?.name ?? '— No flow assigned —'}
-              sub={
-                sequence
-                  ? `${sequence.steps} step${sequence.steps === 1 ? '' : 's'} · ${sequence.durationDays} days`
-                  : undefined
-              }
-              source={segment.sequenceSource}
-            />
-            <InfoChip
-              Icon={Mail}
-              label="Senders"
-              value={
-                segment.senderMode === 'campaign-pool'
-                  ? `Campaign pool · ${senders.length} mailbox${senders.length === 1 ? '' : 'es'}`
-                  : `Segment-specific · ${segmentSenderCount} mailbox${segmentSenderCount === 1 ? '' : 'es'}`
-              }
-              sub={senders.length === 0 ? 'No mailboxes attached yet' : undefined}
-              warn={senders.length === 0}
-            />
-            <InfoChip
-              Icon={Send}
-              label="Outreach"
-              value="Not launched"
-              sub="Per-segment launch ships in Phase B"
-            />
-          </div>
+    <tr className="border-b border-border/50 hover:bg-accent/30">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className={cn('h-2 w-2 rounded-full', isDefault ? 'bg-muted-foreground/40' : 'bg-primary')} />
+          <span className={cn('font-medium', isDefault ? 'text-muted-foreground' : 'text-foreground')}>
+            {segment.name}
+          </span>
         </div>
-
-        {/* Right: row actions */}
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onJumpToLeads?.(segment.id)}
-          >
-            <Eye className="h-3.5 w-3.5" />
-            View leads
-          </Button>
-          <Tooltip
-            content={
-              <div className="space-y-1">
-                <div className="font-semibold text-foreground">Edit coming in Phase C</div>
-                <div className="text-muted-foreground">
-                  Editing name, message, and senders for existing segments ships in the next update.
-                </div>
-              </div>
-            }
-          >
-            <Button variant="outline" size="sm" disabled>
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </Button>
+      </td>
+      <td className="px-4 py-3">
+        <span
+          className={cn(
+            'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+            isDefault ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary',
+          )}
+        >
+          {isDefault ? 'Fallback' : 'Custom'}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums text-foreground">
+        {segment.matchedLeadIds.length}
+      </td>
+      <td className="px-4 py-3">
+        {sequence ? (
+          <div className="text-foreground">
+            <div className="truncate" title={sequence.name}>
+              {sequence.name}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {sequence.steps} steps · {sequence.durationDays} days
+            </div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <div className={cn(senders.length === 0 ? 'text-warning' : 'text-foreground')}>
+          {senderMode === 'campaign-pool'
+            ? `Campaign pool · ${senders.length}`
+            : `Segment-specific · ${sendersCount}`}
+        </div>
+        {senders.length === 0 && (
+          <div className="text-[11px] text-warning">No mailboxes attached</div>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', s.tone)}>
+          <span className={cn('h-1.5 w-1.5 rounded-full', s.dotTone)} />
+          {s.label}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-1">
+          <Tooltip content="View this segment's leads in the Leads tab">
+            <button
+              onClick={() => onJumpToLeads?.(segment.id)}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs text-foreground hover:bg-accent"
+            >
+              <Eye className="h-3 w-3" />
+              View
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
           </Tooltip>
           <Tooltip
             content={
               <div className="space-y-1">
-                <div className="font-semibold text-foreground">Per-segment actions coming</div>
+                <div className="font-semibold text-foreground">Edit ships in Phase C</div>
                 <div className="text-muted-foreground">
-                  Launch, pause, duplicate, delete ship with per-segment launch state.
+                  Editing name, message, and senders for existing segments comes with per-segment launch state.
                 </div>
               </div>
             }
           >
             <button
               disabled
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground opacity-50"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground opacity-50"
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
+              <Pencil className="h-3 w-3" />
+              Edit
+            </button>
+          </Tooltip>
+          <Tooltip content="Launch, pause, duplicate, delete ship with per-segment launch state.">
+            <button
+              disabled
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground opacity-50"
+            >
+              <MoreHorizontal className="h-3 w-3" />
             </button>
           </Tooltip>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function InfoChip({
-  Icon,
-  label,
-  value,
-  sub,
-  source,
-  warn,
-}: {
-  Icon: typeof Workflow;
-  label: string;
-  value: string;
-  sub?: string;
-  source?: 'use-existing' | 'clone' | 'generate' | 'scratch';
-  warn?: boolean;
-}) {
-  const sourceLabel = source
-    ? {
-        'use-existing': 'Linked',
-        clone: 'Cloned',
-        generate: 'AI',
-        scratch: 'Custom',
-      }[source]
-    : null;
-
-  return (
-    <div className="rounded-lg border border-border bg-secondary/30 p-2.5">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <Icon className="h-3 w-3" />
-        {label}
-        {sourceLabel && (
-          <span className="ml-auto rounded bg-muted px-1.5 py-0 text-[9px] font-medium normal-case tracking-normal text-muted-foreground">
-            {sourceLabel}
-          </span>
-        )}
-      </div>
-      <div className={cn('mt-1 text-sm font-medium', warn ? 'text-warning' : 'text-foreground')}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-8 text-center">
-      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Layers className="h-5 w-5" />
-      </div>
-      <div className="mt-3 text-sm font-semibold text-foreground">No custom segments yet</div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        Create your first segment from the Leads tab to start grouping leads with different messaging.
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }

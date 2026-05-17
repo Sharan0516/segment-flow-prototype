@@ -122,9 +122,12 @@ export default function App() {
           )}
           {tab === 'segments' && (
             <SegmentsView
+              leads={initialLeads}
               segments={segments}
               sequences={initialSequences}
               senders={senders}
+              state={state}
+              onAddSegment={addSegment}
               onJumpToLeads={(segmentId) => {
                 setLeadsFilterSegmentId(segmentId);
                 setTab('leads');
