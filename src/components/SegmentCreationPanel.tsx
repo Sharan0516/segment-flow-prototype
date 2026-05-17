@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, ChevronRight, ChevronLeft, Sparkles, Copy, Library,
+  X, ChevronRight, ChevronLeft, Sparkles, Copy, Library, FilePlus2,
   Building2, MapPin, Briefcase, Mail, Award,
   Check, ArrowRight, AlertTriangle, Lock, ArrowRightLeft, AtSign,
 } from 'lucide-react';
 import { LinkedinIcon } from './icons/LinkedinIcon';
-import type { Lead, Segment, Sender, Sequence, SequenceSource, Variant } from '@/lib/types';
+import type { Lead, MessageStep, Segment, Sender, Sequence, SequenceSource } from '@/lib/types';
 import { Input } from './ui/Input';
+import { ChipInput } from './ui/ChipInput';
 import { Button } from './ui/Button';
 import { Checkbox } from './ui/Checkbox';
-import { ABTestSection } from './ABTestSection';
+import { MessageStepEditor } from './MessageStepEditor';
 import { cn } from '@/lib/utils';
 
 interface SegmentCreationPanelProps {
@@ -20,13 +21,20 @@ interface SegmentCreationPanelProps {
   senders: Sender[];
   onSave: (segment: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => void;
   existingSegments: Segment[];
+  /**
+   * If provided, the panel opens in "selection mode": the Audience step skips
+   * filters entirely and shows the locked list of these lead IDs. The user just
+   * confirms (and resolves conflicts if any) before moving on.
+   */
+  presetLeadIds?: string[] | null;
 }
 
-type Step = 'name' | 'audience' | 'message' | 'variants' | 'senders' | 'preview';
+type Step = 'name' | 'audience' | 'message' | 'senders' | 'preview';
 
 interface FilterDraft {
-  title: string;
-  location: string;
+  // Multi-keyword fields: OR within the field (lead matches if any keyword matches)
+  title: string[];
+  location: string[];
   companies: string[];
   industries: string[];
   seniority: string[];
@@ -36,15 +44,15 @@ interface FilterDraft {
 }
 
 const emptyFilter: FilterDraft = {
-  title: '',
-  location: '',
+  title: [],
+  location: [],
   companies: [],
   industries: [],
   seniority: [],
   channel: 'any',
 };
 
-const STEP_ORDER: Step[] = ['name', 'audience', 'message', 'variants', 'senders', 'preview'];
+const STEP_ORDER: Step[] = ['name', 'audience', 'message', 'senders', 'preview'];
 
 const seniorityOptions = ['C-Suite', 'VP / Director', 'Manager', 'IC / Individual'];
 const industryOptions = ['Pharmaceuticals', 'Healthcare', 'Biotech', 'Technology', 'Financial Services'];
@@ -68,6 +76,12 @@ const sourceOptions: { value: SequenceSource; icon: typeof Library; title: strin
     title: 'Generate a new flow with AI',
     subtitle: 'Draft a tailored multi-step message flow for this audience.',
   },
+  {
+    value: 'scratch',
+    icon: FilePlus2,
+    title: 'Create a new flow from scratch',
+    subtitle: "Start with a blank flow and write each step yourself.",
+  },
 ];
 
 export function SegmentCreationPanel({
@@ -78,15 +92,17 @@ export function SegmentCreationPanel({
   senders,
   onSave,
   existingSegments,
+  presetLeadIds,
 }: SegmentCreationPanelProps) {
+  const selectionMode = !!(presetLeadIds && presetLeadIds.length > 0);
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
   const [sequenceSource, setSequenceSource] = useState<SequenceSource | null>(null);
   const [sequenceId, setSequenceId] = useState<string>('');
   const flowPickerRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<FilterDraft>(emptyFilter);
-  const [abEnabled, setAbEnabled] = useState(false);
-  const [abVariants, setAbVariants] = useState<Variant[]>([]);
+  const [messageSteps, setMessageSteps] = useState<MessageStep[]>([]);
+  const [previewLeadId, setPreviewLeadId] = useState<string | null>(null);
   const [resolution, setResolution] = useState<'skip' | 'move' | null>(null);
   const [senderMode, setSenderMode] = useState<'campaign-pool' | 'segment-specific'>('campaign-pool');
   const [segmentSenderIds, setSegmentSenderIds] = useState<string[]>([]);
@@ -103,25 +119,55 @@ export function SegmentCreationPanel({
     }
   }, [sequenceSource]);
 
-  // Pre-fill variants from the selected flow when sequence changes
+  // Populate message steps based on source + sequence
   useEffect(() => {
-    if (!selectedSequence) return;
-    const hasMulti = selectedSequence.variants.length > 1;
-    setAbEnabled(hasMulti);
-    setAbVariants(
-      hasMulti
-        ? selectedSequence.variants.map((v) => ({ ...v }))
-        : selectedSequence.variants[0]
-        ? [{ ...selectedSequence.variants[0] }]
-        : [],
-    );
+    if (sequenceSource === 'scratch') {
+      // Start with one empty step
+      setMessageSteps([
+        {
+          id: `step-${Date.now()}`,
+          channel: 'email',
+          dayOffset: 0,
+          subject: '',
+          body: '',
+          aiGenerated: false,
+          charLimit: 300,
+        },
+      ]);
+    } else if (sequenceSource === 'generate') {
+      // AI generation: leave empty, will draft on save
+      setMessageSteps([]);
+    } else if ((sequenceSource === 'use-existing' || sequenceSource === 'clone') && selectedSequence?.messageSteps) {
+      // Use existing: live link, but show the steps for preview
+      // Clone: deep copy with new IDs so edits don't propagate
+      const ms = selectedSequence.messageSteps;
+      setMessageSteps(
+        sequenceSource === 'clone'
+          ? ms.map((s, i) => ({ ...s, id: `step-clone-${Date.now()}-${i}` }))
+          : ms.map((s) => ({ ...s })),
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sequenceId]);
+  }, [sequenceSource, sequenceId]);
 
   const matched = useMemo(() => {
+    if (selectionMode) {
+      const idSet = new Set(presetLeadIds!);
+      // Preserve the user's selection order
+      return presetLeadIds!.map((id) => leads.find((l) => l.id === id)).filter((l): l is Lead => !!l && idSet.has(l.id));
+    }
     return leads.filter((l) => {
-      if (filter.title && !l.title.toLowerCase().includes(filter.title.toLowerCase())) return false;
-      if (filter.location && !l.location.toLowerCase().includes(filter.location.toLowerCase())) return false;
+      // title: OR within field, AND across fields
+      if (filter.title.length) {
+        const lc = l.title.toLowerCase();
+        const matchesAny = filter.title.some((kw) => lc.includes(kw.toLowerCase()));
+        if (!matchesAny) return false;
+      }
+      if (filter.location.length) {
+        const lc = l.location.toLowerCase();
+        const matchesAny = filter.location.some((kw) => lc.includes(kw.toLowerCase()));
+        if (!matchesAny) return false;
+      }
       if (filter.companies.length && !filter.companies.includes(l.company)) return false;
       if (filter.channel === 'has_email' && !l.email) return false;
       if (filter.channel === 'linkedin_only' && !!l.email) return false;
@@ -130,7 +176,7 @@ export function SegmentCreationPanel({
       if (filter.scoreMax !== undefined && l.score > filter.scoreMax) return false;
       return true;
     });
-  }, [leads, filter]);
+  }, [leads, filter, selectionMode, presetLeadIds]);
 
   // Conflict analysis: which matched leads are claimed by other CUSTOM (non-default) segments?
   const conflicts = useMemo(() => {
@@ -197,7 +243,6 @@ export function SegmentCreationPanel({
     { key: 'name', label: 'Name' },
     { key: 'audience', label: 'Audience' },
     { key: 'message', label: 'Message' },
-    { key: 'variants', label: 'Variants' },
     { key: 'senders', label: 'Senders' },
     { key: 'preview', label: 'Preview' },
   ];
@@ -214,9 +259,9 @@ export function SegmentCreationPanel({
     if (step === 'message') {
       if (sequenceSource === null) return false;
       if (sequenceSource === 'generate') return true;
+      if (sequenceSource === 'scratch') return messageSteps.length > 0 && messageSteps.every((s) => s.body.trim().length > 0);
       return !!sequenceId;
     }
-    if (step === 'variants') return true; // optional
     if (step === 'senders') {
       if (senderMode === 'segment-specific' && senders.length > 0) {
         return segmentSenderIds.length > 0;
@@ -248,20 +293,20 @@ export function SegmentCreationPanel({
         senderMode,
         segmentSenderIds: senderMode === 'segment-specific' ? segmentSenderIds : undefined,
         matchedLeadIds: effectiveMatched.map((l) => l.id),
-        abTest: { enabled: abEnabled && abVariants.length > 1, variants: abVariants },
+        abTest: { enabled: false, variants: [] },
       },
       resolution ?? 'skip',
     );
     setStep('name');
     setName('');
-    setAbEnabled(false);
-    setAbVariants([]);
     setResolution(null);
     setSenderMode('campaign-pool');
     setSegmentSenderIds([]);
     setSequenceSource(null);
     setSequenceId('');
     setFilter(emptyFilter);
+    setMessageSteps([]);
+    setPreviewLeadId(null);
     onClose();
   };
 
@@ -269,12 +314,12 @@ export function SegmentCreationPanel({
     step === 'audience' && conflicts.movable.length > 0 && resolution === null;
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-40 flex">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-[920px] max-w-[95vw] border-l border-border bg-card shadow-2xl">
-        <div className="flex h-full flex-col">
+      <div className="absolute inset-y-0 right-0 w-[920px] max-w-[95vw] border-l border-border bg-card shadow-2xl">
+        <div className="flex h-full min-h-0 flex-col">
           {/* Header */}
-          <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div>
               <h2 className="text-base font-semibold text-foreground">New segment</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -287,7 +332,7 @@ export function SegmentCreationPanel({
           </div>
 
           {/* Stepper */}
-          <div className="flex items-center gap-1 border-b border-border bg-surface px-6 py-3 overflow-x-auto scrollbar-thin">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-6 py-3 overflow-x-auto scrollbar-thin">
             {steps.map((s, idx) => {
               const isActive = s.key === step;
               const isDone = idx < currentStepIdx;
@@ -321,7 +366,7 @@ export function SegmentCreationPanel({
           </div>
 
           {/* Body */}
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 overflow-hidden">
             {step === 'name' && (
               <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
                 <div className="mx-auto max-w-md space-y-6">
@@ -359,7 +404,8 @@ export function SegmentCreationPanel({
 
             {step === 'audience' && (
               <>
-                {/* Filters column */}
+                {/* Filters column — hidden in selection mode */}
+                {!selectionMode && (
                 <div className="w-[340px] shrink-0 overflow-y-auto border-r border-border p-6 scrollbar-thin">
                   <div className="space-y-5">
                     <div>
@@ -369,10 +415,14 @@ export function SegmentCreationPanel({
                       </p>
                     </div>
 
-                    <FilterField icon={Briefcase} label="Job title contains">
-                      <Input
-                        value={filter.title}
-                        onChange={(e) => setFilter({ ...filter, title: e.target.value })}
+                    <FilterField
+                      icon={Briefcase}
+                      label="Job title contains"
+                      hint={filter.title.length > 1 ? `Any of ${filter.title.length} keywords` : 'Press Enter or comma to add'}
+                    >
+                      <ChipInput
+                        values={filter.title}
+                        onChange={(v) => setFilter({ ...filter, title: v })}
                         placeholder="e.g., CFO, VP, Director"
                       />
                     </FilterField>
@@ -402,10 +452,14 @@ export function SegmentCreationPanel({
                       </div>
                     </FilterField>
 
-                    <FilterField icon={MapPin} label="Location contains">
-                      <Input
-                        value={filter.location}
-                        onChange={(e) => setFilter({ ...filter, location: e.target.value })}
+                    <FilterField
+                      icon={MapPin}
+                      label="Location contains"
+                      hint={filter.location.length > 1 ? `Any of ${filter.location.length} keywords` : 'Press Enter or comma to add'}
+                    >
+                      <ChipInput
+                        values={filter.location}
+                        onChange={(v) => setFilter({ ...filter, location: v })}
                         placeholder="e.g., United States, India"
                       />
                     </FilterField>
@@ -483,21 +537,26 @@ export function SegmentCreationPanel({
                     </FilterField>
                   </div>
                 </div>
+                )}
 
-                {/* Live preview column */}
+                {/* Live preview column (in filter mode) or the locked-list column (in selection mode) */}
                 <div className="flex flex-1 flex-col overflow-hidden">
                   <div className="sticky top-0 z-10 border-b border-border bg-gradient-to-r from-primary/10 to-transparent px-6 py-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-xs uppercase tracking-wider text-muted-foreground">Will join this segment</div>
+                        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                          {selectionMode ? 'These leads will be in this segment' : 'Will join this segment'}
+                        </div>
                         <div className="mt-0.5 text-xl font-semibold text-foreground">
                           {effectiveMatched.length}{' '}
                           <span className="text-sm font-normal text-muted-foreground">
-                            of {matched.length} matched · {leads.length} total
+                            {selectionMode
+                              ? `selected${conflicts.locked.length > 0 || (resolution !== 'move' && conflicts.movable.length > 0) ? ` · ${matched.length} from your selection` : ''}`
+                              : `of ${matched.length} matched · ${leads.length} total`}
                           </span>
                         </div>
                       </div>
-                      {matched.length === 0 && (
+                      {!selectionMode && matched.length === 0 && (
                         <div className="rounded-md bg-warning/15 px-2 py-1 text-xs font-medium text-warning">
                           No leads match. Loosen filters.
                         </div>
@@ -764,169 +823,142 @@ export function SegmentCreationPanel({
             )}
 
             {step === 'message' && (
-              <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
-                <div className="mx-auto max-w-2xl space-y-6">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">What messages should this segment receive?</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      A <span className="text-foreground">message flow</span> is the multi-step outreach (your library calls these "Sequences"). Pick where it comes from.
-                    </p>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Source
-                    </div>
-                    <div className="grid gap-3">
-                      {sourceOptions.map((opt) => {
-                        const active = sequenceSource === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            onClick={() => {
-                              setSequenceSource(opt.value);
-                              if (opt.value !== sequenceSource) setSequenceId('');
-                            }}
-                            className={cn(
-                              'group flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
-                              active
-                                ? 'border-primary bg-primary/10'
-                                : 'border-border bg-secondary/40 hover:border-primary/40',
-                            )}
-                          >
-                            <div
-                              className={cn(
-                                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-                                active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-                              )}
-                            >
-                              <opt.icon className="h-4 w-4" />
-                            </div>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-foreground">{opt.title}</span>
-                                {active && (
-                                  <span className="inline-flex items-center rounded-full bg-primary px-1.5 py-0 text-[10px] font-semibold uppercase text-primary-foreground">
-                                    Selected
-                                  </span>
-                                )}
-                              </div>
-                              <div className="mt-0.5 text-xs text-muted-foreground">{opt.subtitle}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {sequenceSource !== null && (
-                    <div
-                      ref={flowPickerRef}
-                      className="animate-in fade-in slide-in-from-top-2 duration-300"
-                    >
-                      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {sequenceSource === 'generate' ? 'What will be drafted' : sequenceSource === 'clone' ? 'Flow to clone from' : 'Flow to use'}
+              <div className="flex w-full flex-1 flex-col overflow-hidden">
+                {/* Top: source picker + (when picker not done) sequence list */}
+                {sequenceSource === null ? (
+                  <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
+                    <div className="mx-auto max-w-2xl space-y-6">
+                      <div>
+                        <h3 className="text-base font-semibold text-foreground">What messages should this segment receive?</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          A <span className="text-foreground">message flow</span> is the multi-step outreach (your library calls these "Sequences"). Pick where it comes from.
+                        </p>
                       </div>
 
-                      {sequenceSource === 'generate' ? (
-                        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-                          <div className="flex items-start gap-3">
-                            <Sparkles className="h-5 w-5 shrink-0 text-primary" />
-                            <div>
-                              <div className="text-sm font-medium text-foreground">A tailored message flow will be drafted</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                Using the {effectiveMatched.length} leads in this segment and the campaign plan, Copilot will create a multi-step flow.
-                                You'll review before launch.
+                      <div>
+                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Source
+                        </div>
+                        <div className="grid gap-3">
+                          {sourceOptions.map((opt) => (
+                            <button
+                              key={opt.value}
+                              onClick={() => {
+                                setSequenceSource(opt.value);
+                                setSequenceId('');
+                              }}
+                              className="group flex items-start gap-3 rounded-xl border border-border bg-secondary/40 p-4 text-left transition-colors hover:border-primary/40"
+                            >
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground">
+                                <opt.icon className="h-4 w-4" />
                               </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-foreground">{opt.title}</div>
+                                <div className="mt-0.5 text-xs text-muted-foreground">{opt.subtitle}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (sequenceSource === 'use-existing' || sequenceSource === 'clone') && !sequenceId ? (
+                  // Pick which existing flow
+                  <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
+                    <div className="mx-auto max-w-2xl space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-semibold text-foreground">
+                          {sequenceSource === 'clone' ? 'Flow to clone from' : 'Flow to use'}
+                        </h3>
+                        <button
+                          onClick={() => setSequenceSource(null)}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Change source
+                        </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {sequences.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => setSequenceId(s.id)}
+                            className="flex w-full items-center justify-between rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-left hover:border-primary/40"
+                          >
+                            <div>
+                              <div className="text-sm font-medium text-foreground">{s.name}</div>
+                              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>{s.steps} steps · {s.durationDays} days</span>
+                                <span className="rounded bg-muted px-1.5 py-0 text-[10px]">{s.channel.replace(/_/g, ' → ')}</span>
+                              </div>
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : sequenceSource === 'generate' ? (
+                  <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
+                    <div className="mx-auto max-w-2xl space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-semibold text-foreground">AI-generated flow</h3>
+                        <button onClick={() => setSequenceSource(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                          Change source
+                        </button>
+                      </div>
+                      <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                        <div className="flex items-start gap-3">
+                          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
+                          <div>
+                            <div className="text-sm font-medium text-foreground">A tailored flow will be drafted</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Using the {effectiveMatched.length} leads in this segment and the campaign plan, Copilot drafts a multi-step flow. You can review and edit each step before launch.
                             </div>
                           </div>
                         </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {sequences.map((s) => {
-                            const active = sequenceId === s.id;
-                            return (
-                              <button
-                                key={s.id}
-                                onClick={() => setSequenceId(s.id)}
-                                className={cn(
-                                  'flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-colors',
-                                  active ? 'border-primary bg-primary/10' : 'border-border bg-secondary/40 hover:border-primary/40',
-                                )}
-                              >
-                                <div>
-                                  <div className="text-sm font-medium text-foreground">{s.name}</div>
-                                  <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                                    <span>{s.steps} steps · {s.durationDays} days</span>
-                                    <span className="rounded bg-muted px-1.5 py-0 text-[10px]">{s.channel.replace(/_/g, ' → ')}</span>
-                                    {s.variants.length > 1 && (
-                                      <span className="inline-flex items-center rounded bg-primary/15 px-1.5 py-0 text-[10px] text-primary">
-                                        A/B · {s.variants.length} variants
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                {active && <Check className="h-4 w-4 text-primary" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {step === 'variants' && (
-              <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
-                <div className="mx-auto max-w-2xl space-y-5">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">Test message variations?</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Run an A/B test on the message for this segment. Optional — leave off if everyone should get the same version.
-                    </p>
                   </div>
-
-                  <div className="rounded-xl border border-border bg-secondary/40 p-4">
-                    <ABTestSection
-                      enabled={abEnabled}
-                      variants={abVariants}
-                      matchedCount={effectiveMatched.length}
-                      sequenceHasVariants={(selectedSequence?.variants.length ?? 0) > 1}
-                      onToggle={(v) => {
-                        setAbEnabled(v);
-                        if (v && abVariants.length < 2) {
-                          const base = abVariants[0] ?? selectedSequence?.variants[0];
-                          const newB: Variant = {
-                            id: `v-new-b-${Date.now()}`,
-                            label: 'B',
-                            angle: 'Try a contrasting angle',
-                            subjectPreview: '',
-                            bodyPreview: '',
-                            weight: 0.5,
-                          };
-                          setAbVariants(
-                            base
-                              ? [{ ...base, label: 'A', weight: 0.5 }, newB]
-                              : [
-                                  {
-                                    id: 'v-new-a-' + Date.now(),
-                                    label: 'A',
-                                    angle: 'Primary angle',
-                                    subjectPreview: '',
-                                    bodyPreview: '',
-                                    weight: 0.5,
-                                  },
-                                  newB,
-                                ],
-                          );
+                ) : (
+                  // sequenceSource is scratch, or sequenceId is set: show the two-pane editor
+                  <>
+                    <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {sequenceSource === 'scratch'
+                            ? `${name || 'New flow'} (from scratch)`
+                            : sequenceSource === 'clone'
+                            ? `Clone of: ${selectedSequence?.name ?? ''}`
+                            : selectedSequence?.name}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSequenceSource(null);
+                          setSequenceId('');
+                          setMessageSteps([]);
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Change source
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <MessageStepEditor
+                        steps={messageSteps}
+                        onChange={setMessageSteps}
+                        previewLead={
+                          previewLeadId
+                            ? effectiveMatched.find((l) => l.id === previewLeadId)
+                            : effectiveMatched[0]
                         }
-                      }}
-                      onChange={setAbVariants}
-                    />
-                  </div>
-                </div>
+                        previewLeads={effectiveMatched}
+                        onChangePreviewLead={setPreviewLeadId}
+                        senders={senders}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -986,19 +1018,21 @@ export function SegmentCreationPanel({
                         value={
                           sequenceSource === 'generate'
                             ? 'AI-generated (will draft on save)'
+                            : sequenceSource === 'scratch'
+                            ? `Custom flow · ${messageSteps.length} step${messageSteps.length === 1 ? '' : 's'}`
                             : `${sequenceSource === 'clone' ? 'Cloned from' : 'Linked to'}: ${
                                 sequences.find((s) => s.id === sequenceId)?.name
                               }`
                         }
                       />
                       <ReviewRow
-                        label="A/B test"
+                        label="Steps"
                         value={
-                          abEnabled && abVariants.length > 1
-                            ? `${abVariants.length} variants · ${abVariants
-                                .map((v) => `${v.label} ${Math.round(v.weight * 100)}%`)
-                                .join(' · ')}`
-                            : 'Off · single message'
+                          messageSteps.length > 0
+                            ? `${messageSteps.length} · ${messageSteps[messageSteps.length - 1].dayOffset} day${messageSteps[messageSteps.length - 1].dayOffset === 1 ? '' : 's'} total`
+                            : sequenceSource === 'generate'
+                            ? 'Will be drafted on save'
+                            : '—'
                         }
                       />
                       <ReviewRow
@@ -1013,37 +1047,13 @@ export function SegmentCreationPanel({
                       />
                     </div>
                   </div>
-
-                  {abEnabled && abVariants.length > 1 && (
-                    <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-                      <div className="text-xs font-medium uppercase tracking-wider text-primary mb-2">
-                        Variants being tested
-                      </div>
-                      <div className="space-y-2">
-                        {abVariants.map((v) => (
-                          <div key={v.id} className="flex items-start gap-2 text-xs">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-                              {v.label}
-                            </span>
-                            <div className="flex-1">
-                              <div className="font-medium text-foreground">{v.angle}</div>
-                              {v.subjectPreview && (
-                                <div className="mt-0.5 text-muted-foreground">Subject: {v.subjectPreview}</div>
-                              )}
-                            </div>
-                            <div className="text-muted-foreground">{Math.round(v.weight * 100)}%</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-border bg-card px-6 py-3">
+          <div className="flex shrink-0 items-center justify-between border-t border-border bg-card px-6 py-3">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <div className="flex items-center gap-3">
               {unresolvedConflict && (
@@ -1073,10 +1083,12 @@ export function SegmentCreationPanel({
 function FilterField({
   icon: Icon,
   label,
+  hint,
   children,
 }: {
   icon: typeof Building2;
   label: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -1086,6 +1098,7 @@ function FilterField({
         {label}
       </label>
       {children}
+      {hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 export type LifecycleState = 'setup' | 'running' | 'paused' | 'partial' | 'finished';
 
 export type EmailStatus = 'verified' | 'unverified' | 'invalid' | 'missing';
+export type LinkedinStatus = 'verified' | 'unverified' | 'missing';
 
 export interface Lead {
   id: string;
@@ -13,6 +14,7 @@ export interface Lead {
   score: number;
   scoreBreakdown: { label: string; points: number }[];
   emailStatus: EmailStatus;
+  linkedinStatus: LinkedinStatus;
   segmentId: string | null;
   outreachStarted: boolean;
   // Runtime-only fields
@@ -21,7 +23,19 @@ export interface Lead {
   engagement?: 'opened' | 'replied' | 'clicked' | 'bounced' | null;
 }
 
-export type SequenceSource = 'use-existing' | 'clone' | 'generate';
+export type SequenceSource = 'use-existing' | 'clone' | 'generate' | 'scratch';
+
+export type StepChannel = 'email' | 'linkedin_connection' | 'linkedin_message';
+
+export interface MessageStep {
+  id: string;
+  channel: StepChannel;
+  dayOffset: number;
+  subject?: string;
+  body: string;
+  aiGenerated: boolean;
+  charLimit?: number;
+}
 
 export interface Variant {
   id: string;
@@ -39,6 +53,7 @@ export interface Sequence {
   steps: number;
   durationDays: number;
   variants: Variant[];
+  messageSteps?: MessageStep[];
   locked?: boolean;
 }
 

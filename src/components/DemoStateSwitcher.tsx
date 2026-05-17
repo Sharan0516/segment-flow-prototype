@@ -40,7 +40,7 @@ export function DemoStateSwitcher({ variant, onChange }: DemoStateSwitcherProps)
   const current = VARIANTS.find((v) => v.value === variant) ?? VARIANTS[0];
 
   return (
-    <div ref={ref} className="fixed bottom-4 right-4 z-50">
+    <div ref={ref} className="fixed bottom-4 right-4 z-30">
       {open && (
         <div className="mb-2 w-72 rounded-xl border border-border bg-card p-1 shadow-2xl">
           <div className="border-b border-border px-3 py-2">

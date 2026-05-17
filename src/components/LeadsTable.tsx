@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ArrowUpDown } from 'lucide-react';
-import { LinkedinIcon } from './icons/LinkedinIcon';
 import type { Lead, Segment } from '@/lib/types';
 import { Checkbox } from './ui/Checkbox';
 import { ScoreBadge } from './ScoreBadge';
-import { EmailStatusCell } from './EmailStatusCell';
+import { VerificationCell } from './VerificationCell';
 import { ColumnHeaderFilter } from './ColumnHeaderFilter';
 import { cn } from '@/lib/utils';
 
@@ -117,8 +116,7 @@ export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSe
                   />
                 </span>
               </th>
-              <th className="px-3 py-2.5 text-left font-medium">Email</th>
-              <th className="w-12 px-3 py-2.5 text-left font-medium">LI</th>
+              <th className="px-3 py-2.5 text-left font-medium">Verification</th>
               <th className="px-3 py-2.5 text-left font-medium">
                 <button onClick={() => setSortKey('score')} className="inline-flex items-center gap-1 hover:text-foreground">
                   Score <ArrowUpDown className="h-3 w-3" />
@@ -151,19 +149,12 @@ export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSe
                   <td className="px-3 py-3 text-foreground">{lead.company}</td>
                   <td className="px-3 py-3 text-muted-foreground">{lead.location}</td>
                   <td className="px-3 py-3">
-                    <EmailStatusCell status={lead.emailStatus} email={lead.email} />
-                  </td>
-                  <td className="px-3 py-3">
-                    {lead.linkedinUrl && (
-                      <a
-                        href={lead.linkedinUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <LinkedinIcon className="h-3 w-3" />
-                      </a>
-                    )}
+                    <VerificationCell
+                      emailStatus={lead.emailStatus}
+                      linkedinStatus={lead.linkedinStatus}
+                      email={lead.email}
+                      linkedinUrl={lead.linkedinUrl}
+                    />
                   </td>
                   <td className="px-3 py-3">
                     <ScoreBadge lead={lead} />

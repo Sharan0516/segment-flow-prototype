@@ -4,6 +4,7 @@ import { CampaignHeader } from '@/components/CampaignHeader';
 import { TabBar, type TabKey } from '@/components/TabBar';
 import { DemoStateSwitcher, type DemoVariant } from '@/components/DemoStateSwitcher';
 import { SetupView } from '@/views/SetupView';
+import { SegmentsView } from '@/views/SegmentsView';
 import { LiveView } from '@/views/LiveView';
 import { AnalyticsView } from '@/views/AnalyticsView';
 import { SettingsView } from '@/views/SettingsView';
@@ -32,6 +33,7 @@ export default function App() {
   const [demoVariant, setDemoVariant] = useState<DemoVariant>('configured');
   const [segments, setSegments] = useState<Segment[]>(configuredSegments);
   const [senders, setSenders] = useState<Sender[]>(initialSenders);
+  const [leadsFilterSegmentId, setLeadsFilterSegmentId] = useState<string | 'all'>('all');
 
   const campaign = { ...initialCampaign, state };
 
@@ -96,7 +98,13 @@ export default function App() {
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <CampaignHeader campaign={campaign} state={state} onChangeState={handleStateChange} />
-        <TabBar active={tab} onChange={setTab} state={state} leadCount={initialLeads.length} />
+        <TabBar
+          active={tab}
+          onChange={setTab}
+          state={state}
+          leadCount={initialLeads.length}
+          segmentCount={segments.filter((s) => !s.isDefault).length}
+        />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           {tab === 'leads' && (
             <SetupView
@@ -105,10 +113,22 @@ export default function App() {
               sequences={initialSequences}
               senders={senders}
               state={state}
+              initialActiveSegmentId={leadsFilterSegmentId}
               onAddSegment={addSegment}
               onAddLeadsToSegment={addLeadsToSegment}
               onConfigureSenders={() => setTab('settings')}
               onLaunch={() => handleStateChange('running')}
+            />
+          )}
+          {tab === 'segments' && (
+            <SegmentsView
+              segments={segments}
+              sequences={initialSequences}
+              senders={senders}
+              onJumpToLeads={(segmentId) => {
+                setLeadsFilterSegmentId(segmentId);
+                setTab('leads');
+              }}
             />
           )}
           {tab === 'live' && (

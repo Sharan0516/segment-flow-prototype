@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Rocket, Search, Settings2 } from 'lucide-react';
 import type { Lead, LifecycleState, Segment, Sender, Sequence } from '@/lib/types';
 import { ProgressiveDisclosureBar } from '@/components/ProgressiveDisclosureBar';
@@ -18,18 +18,49 @@ interface SetupViewProps {
   sequences: Sequence[];
   senders: Sender[];
   state: LifecycleState;
+  /** Optional initial / synced active segment id. Updates when changed from outside. */
+  initialActiveSegmentId?: string | 'all';
   onAddSegment: (s: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => void;
   onAddLeadsToSegment: (segmentId: string, leadIds: string[]) => void;
   onConfigureSenders: () => void;
   onLaunch: () => void;
 }
 
-export function SetupView({ leads, segments, sequences, senders, state, onAddSegment, onAddLeadsToSegment, onConfigureSenders, onLaunch }: SetupViewProps) {
-  const [activeSegment, setActiveSegment] = useState<string | 'all'>('all');
+export function SetupView({
+  leads,
+  segments,
+  sequences,
+  senders,
+  state,
+  initialActiveSegmentId,
+  onAddSegment,
+  onAddLeadsToSegment,
+  onConfigureSenders,
+  onLaunch,
+}: SetupViewProps) {
+  const [activeSegment, setActiveSegment] = useState<string | 'all'>(initialActiveSegmentId ?? 'all');
+  // Sync when parent pushes a new value (e.g., jumped from Segments tab)
+  useEffect(() => {
+    if (initialActiveSegmentId !== undefined) setActiveSegment(initialActiveSegmentId);
+  }, [initialActiveSegmentId]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [segmentPanelOpen, setSegmentPanelOpen] = useState(false);
+  const [panelPresetLeadIds, setPanelPresetLeadIds] = useState<string[] | null>(null);
   const [launchOpen, setLaunchOpen] = useState(false);
+
+  const openPanelFromFilters = () => {
+    setPanelPresetLeadIds(null);
+    setSegmentPanelOpen(true);
+  };
+  const openPanelFromSelection = () => {
+    setPanelPresetLeadIds([...selectedIds]);
+    setSegmentPanelOpen(true);
+  };
+  const closePanel = () => {
+    setSegmentPanelOpen(false);
+    setPanelPresetLeadIds(null);
+  };
 
   const filteredLeads = useMemo(
     () =>
@@ -69,7 +100,7 @@ export function SetupView({ leads, segments, sequences, senders, state, onAddSeg
           <FirstRunEducation
             leadCount={leads.length}
             blockerText={blockerText}
-            onCreateSegment={() => setSegmentPanelOpen(true)}
+            onCreateSegment={openPanelFromFilters}
             onSendToAll={() => setLaunchOpen(true)}
           />
         )}
@@ -79,7 +110,7 @@ export function SetupView({ leads, segments, sequences, senders, state, onAddSeg
             segments={segments}
             activeSegmentId={activeSegment}
             onChange={setActiveSegment}
-            onCreate={() => setSegmentPanelOpen(true)}
+            onCreate={openPanelFromFilters}
             totalLeads={leads.length}
           />
           <div className="flex items-center gap-2">
@@ -115,7 +146,7 @@ export function SetupView({ leads, segments, sequences, senders, state, onAddSeg
             segments={segments}
             blockerText={blockerText}
             onClear={() => setSelectedIds([])}
-            onCreateSegment={() => setSegmentPanelOpen(true)}
+            onCreateSegment={openPanelFromSelection}
             onLaunch={() => setLaunchOpen(true)}
             onAddToSegment={(segmentId) => {
               onAddLeadsToSegment(segmentId, selectedIds);
@@ -136,12 +167,17 @@ export function SetupView({ leads, segments, sequences, senders, state, onAddSeg
 
       <SegmentCreationPanel
         open={segmentPanelOpen}
-        onClose={() => setSegmentPanelOpen(false)}
+        onClose={closePanel}
         leads={leads}
         sequences={sequences}
         senders={senders}
         existingSegments={segments}
-        onSave={onAddSegment}
+        presetLeadIds={panelPresetLeadIds}
+        onSave={(seg, resolution) => {
+          onAddSegment(seg, resolution);
+          // If we opened from a selection, clear it after creation.
+          if (panelPresetLeadIds) setSelectedIds([]);
+        }}
       />
 
       <LaunchModal

@@ -1,23 +1,25 @@
-import { Users, Activity, BarChart3, Settings } from 'lucide-react';
+import { Users, Layers, Activity, BarChart3, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { LifecycleState } from '@/lib/types';
 
-export type TabKey = 'leads' | 'live' | 'analytics' | 'settings';
+export type TabKey = 'leads' | 'segments' | 'live' | 'analytics' | 'settings';
 
 interface TabBarProps {
   active: TabKey;
   onChange: (tab: TabKey) => void;
   state: LifecycleState;
   leadCount: number;
+  segmentCount: number;
 }
 
-export function TabBar({ active, onChange, state, leadCount }: TabBarProps) {
+export function TabBar({ active, onChange, state, leadCount, segmentCount }: TabBarProps) {
   // Mode-aware: which tabs are "primary" for this state
   const isRunMode = state === 'running' || state === 'paused' || state === 'partial';
   const isReviewMode = state === 'finished';
 
   const tabs = [
     { key: 'leads' as TabKey, label: 'Leads', icon: Users, count: leadCount, suggested: state === 'setup' },
+    { key: 'segments' as TabKey, label: 'Segments', icon: Layers, count: segmentCount, suggested: false },
     { key: 'live' as TabKey, label: 'Live', icon: Activity, count: null, suggested: isRunMode },
     { key: 'analytics' as TabKey, label: 'Analytics', icon: BarChart3, count: null, suggested: isReviewMode },
     { key: 'settings' as TabKey, label: 'Settings', icon: Settings, count: null, suggested: false },
