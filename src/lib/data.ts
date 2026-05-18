@@ -411,6 +411,7 @@ export const configuredSegments: Segment[] = [
     sequenceSource: 'clone',
     senderMode: 'campaign-pool',
     matchedLeadIds: seniorLeaderLeadIds,
+    status: 'draft',
     abTest: { enabled: false, variants: [] },
   },
   {
@@ -422,6 +423,7 @@ export const configuredSegments: Segment[] = [
     sequenceSource: 'use-existing',
     senderMode: 'campaign-pool',
     matchedLeadIds: leads.filter((l) => l.segmentId !== 'seg-senior-leaders').map((l) => l.id),
+    status: 'draft',
     abTest: { enabled: false, variants: [] },
   },
 ];
@@ -436,6 +438,7 @@ export const firstRunSegments: Segment[] = [
     sequenceSource: 'use-existing',
     senderMode: 'campaign-pool',
     matchedLeadIds: leads.map((l) => l.id),
+    status: 'draft',
     abTest: { enabled: false, variants: [] },
   },
 ];

@@ -22,8 +22,9 @@ interface SetupViewProps {
   initialActiveSegmentId?: string | 'all';
   onAddSegment: (s: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => void;
   onAddLeadsToSegment: (segmentId: string, leadIds: string[]) => void;
+  onMoveLead: (leadId: string, segmentId: string | null) => void;
   onConfigureSenders: () => void;
-  onLaunch: () => void;
+  onLaunchSegments: (segmentIds: string[]) => void;
 }
 
 export function SetupView({
@@ -35,8 +36,9 @@ export function SetupView({
   initialActiveSegmentId,
   onAddSegment,
   onAddLeadsToSegment,
+  onMoveLead,
   onConfigureSenders,
-  onLaunch,
+  onLaunchSegments,
 }: SetupViewProps) {
   const [activeSegment, setActiveSegment] = useState<string | 'all'>(initialActiveSegmentId ?? 'all');
   // Sync when parent pushes a new value (e.g., jumped from Segments tab)
@@ -162,6 +164,7 @@ export function SetupView({
           activeSegmentId={activeSegment}
           selectedIds={selectedIds}
           onSelectedChange={setSelectedIds}
+          onMoveLead={onMoveLead}
         />
       </div>
 
@@ -183,15 +186,14 @@ export function SetupView({
       <LaunchModal
         open={launchOpen}
         onClose={() => setLaunchOpen(false)}
-        onLaunch={() => {
+        onLaunchSegments={(ids) => {
           setLaunchOpen(false);
-          onLaunch();
+          onLaunchSegments(ids);
         }}
         leads={leads}
         segments={segments}
         sequences={sequences}
         senders={senders}
-        selectedIds={leads.map((l) => l.id)}
       />
     </>
   );

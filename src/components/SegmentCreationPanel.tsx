@@ -20,6 +20,11 @@ interface SegmentCreationPanelProps {
   sequences: Sequence[];
   senders: Sender[];
   onSave: (segment: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => void;
+  /**
+   * Update callback fired in edit mode. Receives the full segment with its
+   * existing id and the new field values.
+   */
+  onUpdate?: (segmentId: string, patch: Partial<Segment>) => void;
   existingSegments: Segment[];
   /**
    * If provided, the panel opens in "selection mode": the Audience step skips
@@ -27,6 +32,11 @@ interface SegmentCreationPanelProps {
    * confirms (and resolves conflicts if any) before moving on.
    */
   presetLeadIds?: string[] | null;
+  /**
+   * If provided, the panel opens in "edit mode": all fields pre-filled from
+   * the given segment, Save button updates instead of creates.
+   */
+  editSegmentId?: string | null;
 }
 
 type Step = 'name' | 'audience' | 'message' | 'senders' | 'preview';
@@ -35,10 +45,12 @@ interface FilterDraft {
   // Multi-keyword fields: OR within the field (lead matches if any keyword matches)
   title: string[];
   location: string[];
+  companyName: string[];
   companies: string[];
   industries: string[];
   seniority: string[];
   channel: 'any' | 'has_email' | 'linkedin_only' | 'has_both';
+  verification: 'any' | 'email' | 'linkedin' | 'both';
   scoreMin?: number;
   scoreMax?: number;
 }
@@ -46,10 +58,12 @@ interface FilterDraft {
 const emptyFilter: FilterDraft = {
   title: [],
   location: [],
+  companyName: [],
   companies: [],
   industries: [],
   seniority: [],
   channel: 'any',
+  verification: 'any',
 };
 
 const STEP_ORDER: Step[] = ['name', 'audience', 'message', 'senders', 'preview'];
@@ -91,10 +105,16 @@ export function SegmentCreationPanel({
   sequences,
   senders,
   onSave,
+  onUpdate,
   existingSegments,
   presetLeadIds,
+  editSegmentId,
 }: SegmentCreationPanelProps) {
   const selectionMode = !!(presetLeadIds && presetLeadIds.length > 0);
+  const editingSegment = editSegmentId ? existingSegments.find((s) => s.id === editSegmentId) : null;
+  const editMode = !!editingSegment;
+  const audienceLocked = editMode && editingSegment.status !== 'draft';
+
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
   const [sequenceSource, setSequenceSource] = useState<SequenceSource | null>(null);
@@ -106,6 +126,38 @@ export function SegmentCreationPanel({
   const [resolution, setResolution] = useState<'skip' | 'move' | null>(null);
   const [senderMode, setSenderMode] = useState<'campaign-pool' | 'segment-specific'>('campaign-pool');
   const [segmentSenderIds, setSegmentSenderIds] = useState<string[]>([]);
+
+  // When entering edit mode (or switching segments to edit), pre-fill all fields.
+  // When opening in create mode, reset state so leftover values from a previous
+  // cancelled session don't leak into a fresh create.
+  useEffect(() => {
+    if (!open) return;
+    if (editingSegment) {
+      setName(editingSegment.name);
+      setSequenceSource(editingSegment.sequenceSource);
+      setSequenceId(editingSegment.sequenceId);
+      setSenderMode(editingSegment.senderMode);
+      setSegmentSenderIds(editingSegment.segmentSenderIds ?? []);
+      const seq = sequences.find((s) => s.id === editingSegment.sequenceId);
+      if (seq?.messageSteps) {
+        setMessageSteps(seq.messageSteps.map((s) => ({ ...s })));
+      }
+      setStep('name');
+    } else {
+      // Fresh create: reset to defaults
+      setName('');
+      setSequenceSource(null);
+      setSequenceId('');
+      setSenderMode('campaign-pool');
+      setSegmentSenderIds([]);
+      setMessageSteps([]);
+      setFilter(emptyFilter);
+      setResolution(null);
+      setPreviewLeadId(null);
+      setStep('name');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingSegment?.id, open]);
 
   const selectedSequence = sequences.find((s) => s.id === sequenceId);
 
@@ -156,6 +208,13 @@ export function SegmentCreationPanel({
       // Preserve the user's selection order
       return presetLeadIds!.map((id) => leads.find((l) => l.id === id)).filter((l): l is Lead => !!l && idSet.has(l.id));
     }
+    if (editMode && editingSegment) {
+      // In edit mode: show the segment's current members as the locked audience
+      const idSet = new Set(editingSegment.matchedLeadIds);
+      return editingSegment.matchedLeadIds
+        .map((id) => leads.find((l) => l.id === id))
+        .filter((l): l is Lead => !!l && idSet.has(l.id));
+    }
     return leads.filter((l) => {
       // title: OR within field, AND across fields
       if (filter.title.length) {
@@ -168,19 +227,30 @@ export function SegmentCreationPanel({
         const matchesAny = filter.location.some((kw) => lc.includes(kw.toLowerCase()));
         if (!matchesAny) return false;
       }
+      if (filter.companyName.length) {
+        const lc = l.company.toLowerCase();
+        const matchesAny = filter.companyName.some((kw) => lc.includes(kw.toLowerCase()));
+        if (!matchesAny) return false;
+      }
       if (filter.companies.length && !filter.companies.includes(l.company)) return false;
       if (filter.channel === 'has_email' && !l.email) return false;
       if (filter.channel === 'linkedin_only' && !!l.email) return false;
       if (filter.channel === 'has_both' && (!l.email || !l.linkedinUrl)) return false;
+      if (filter.verification === 'email' && l.emailStatus !== 'verified') return false;
+      if (filter.verification === 'linkedin' && l.linkedinStatus !== 'verified') return false;
+      if (filter.verification === 'both' && (l.emailStatus !== 'verified' || l.linkedinStatus !== 'verified')) return false;
       if (filter.scoreMin !== undefined && l.score < filter.scoreMin) return false;
       if (filter.scoreMax !== undefined && l.score > filter.scoreMax) return false;
       return true;
     });
-  }, [leads, filter, selectionMode, presetLeadIds]);
+  }, [leads, filter, selectionMode, presetLeadIds, editMode, editingSegment]);
 
   // Conflict analysis: which matched leads are claimed by other CUSTOM (non-default) segments?
+  // In edit mode, the segment being edited is excluded from the conflict source.
   const conflicts = useMemo(() => {
-    const customSegments = existingSegments.filter((s) => !s.isDefault);
+    const customSegments = existingSegments.filter(
+      (s) => !s.isDefault && s.id !== editingSegment?.id,
+    );
     const claimed = new Map<string, Segment>();
     customSegments.forEach((seg) => {
       seg.matchedLeadIds.forEach((id) => {
@@ -219,7 +289,7 @@ export function SegmentCreationPanel({
       locked,
       bySegment: Array.from(bySegment.values()),
     };
-  }, [matched, existingSegments]);
+  }, [matched, existingSegments, editingSegment?.id]);
 
   // Effective leads after applying resolution: always excludes locked; excludes movable if Skip or unresolved
   const effectiveMatched = useMemo(() => {
@@ -283,20 +353,37 @@ export function SegmentCreationPanel({
   };
 
   const handleSave = () => {
-    onSave(
-      {
-        name: name.trim() || 'New segment',
-        isDefault: false,
-        rules: [],
+    if (editMode && editingSegment) {
+      // Update existing segment in place
+      const patch: Partial<Segment> = {
+        name: name.trim() || editingSegment.name,
         sequenceId,
-        sequenceSource: sequenceSource ?? 'use-existing',
+        sequenceSource: sequenceSource ?? editingSegment.sequenceSource,
         senderMode,
         segmentSenderIds: senderMode === 'segment-specific' ? segmentSenderIds : undefined,
-        matchedLeadIds: effectiveMatched.map((l) => l.id),
-        abTest: { enabled: false, variants: [] },
-      },
-      resolution ?? 'skip',
-    );
+      };
+      // Only update audience if not locked
+      if (!audienceLocked) {
+        patch.matchedLeadIds = effectiveMatched.map((l) => l.id);
+      }
+      onUpdate?.(editingSegment.id, patch);
+    } else {
+      onSave(
+        {
+          name: name.trim() || 'New segment',
+          isDefault: false,
+          rules: [],
+          sequenceId,
+          sequenceSource: sequenceSource ?? 'use-existing',
+          senderMode,
+          segmentSenderIds: senderMode === 'segment-specific' ? segmentSenderIds : undefined,
+          matchedLeadIds: effectiveMatched.map((l) => l.id),
+          status: 'draft',
+          abTest: { enabled: false, variants: [] },
+        },
+        resolution ?? 'skip',
+      );
+    }
     setStep('name');
     setName('');
     setResolution(null);
@@ -321,9 +408,15 @@ export function SegmentCreationPanel({
           {/* Header */}
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div>
-              <h2 className="text-base font-semibold text-foreground">New segment</h2>
+              <h2 className="text-base font-semibold text-foreground">
+                {editMode ? `Edit segment: ${editingSegment?.name}` : 'New segment'}
+              </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Group leads who should get different messaging. Step {currentStepIdx + 1} of {steps.length}.
+                {editMode
+                  ? audienceLocked
+                    ? 'This segment is in flight, so the audience is locked. Name, message, and senders are editable.'
+                    : 'Edit any field. Click a step to jump to it.'
+                  : `Group leads who should get different messaging. Step ${currentStepIdx + 1} of ${steps.length}.`}
               </p>
             </div>
             <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -339,12 +432,12 @@ export function SegmentCreationPanel({
               return (
                 <div key={s.key} className="flex shrink-0 items-center gap-1">
                   <button
-                    onClick={() => idx <= currentStepIdx && setStep(s.key)}
+                    onClick={() => (editMode || idx <= currentStepIdx) && setStep(s.key)}
                     className={cn(
                       'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium',
                       isActive
                         ? 'bg-primary/15 text-primary'
-                        : isDone
+                        : isDone || editMode
                         ? 'text-foreground hover:bg-accent'
                         : 'text-muted-foreground',
                     )}
@@ -404,8 +497,8 @@ export function SegmentCreationPanel({
 
             {step === 'audience' && (
               <>
-                {/* Filters column — hidden in selection mode */}
-                {!selectionMode && (
+                {/* Filters column — hidden in selection mode and edit mode */}
+                {!selectionMode && !editMode && (
                 <div className="w-[340px] shrink-0 overflow-y-auto border-r border-border p-6 scrollbar-thin">
                   <div className="space-y-5">
                     <div>
@@ -464,6 +557,18 @@ export function SegmentCreationPanel({
                       />
                     </FilterField>
 
+                    <FilterField
+                      icon={Building2}
+                      label="Company name contains"
+                      hint={filter.companyName.length > 1 ? `Any of ${filter.companyName.length} keywords` : 'Free-text search, separate with Enter or comma'}
+                    >
+                      <ChipInput
+                        values={filter.companyName}
+                        onChange={(v) => setFilter({ ...filter, companyName: v })}
+                        placeholder="e.g., Pharma, Aspen, Novartis"
+                      />
+                    </FilterField>
+
                     <FilterField icon={Building2} label="Industry">
                       <div className="flex flex-wrap gap-1.5">
                         {industryOptions.map((s) => {
@@ -514,6 +619,31 @@ export function SegmentCreationPanel({
                       </div>
                     </FilterField>
 
+                    <FilterField icon={Award} label="Profile verification">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { v: 'any' as const, label: 'Any' },
+                          { v: 'email' as const, label: 'Email verified' },
+                          { v: 'linkedin' as const, label: 'LinkedIn verified' },
+                          { v: 'both' as const, label: 'Both verified' },
+                        ].map(({ v, label }) => {
+                          const active = filter.verification === v;
+                          return (
+                            <button
+                              key={v}
+                              onClick={() => setFilter({ ...filter, verification: v })}
+                              className={cn(
+                                'rounded-md border px-2 py-1 text-xs',
+                                active ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
+                              )}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </FilterField>
+
                     <FilterField icon={Award} label="Score range">
                       <div className="flex items-center gap-2">
                         <Input
@@ -545,18 +675,24 @@ export function SegmentCreationPanel({
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                          {selectionMode ? 'These leads will be in this segment' : 'Will join this segment'}
+                          {editMode
+                            ? 'Leads currently in this segment'
+                            : selectionMode
+                            ? 'These leads will be in this segment'
+                            : 'Will join this segment'}
                         </div>
                         <div className="mt-0.5 text-xl font-semibold text-foreground">
                           {effectiveMatched.length}{' '}
                           <span className="text-sm font-normal text-muted-foreground">
-                            {selectionMode
+                            {editMode
+                              ? `lead${effectiveMatched.length === 1 ? '' : 's'}${audienceLocked ? ' · audience locked' : ''}`
+                              : selectionMode
                               ? `selected${conflicts.locked.length > 0 || (resolution !== 'move' && conflicts.movable.length > 0) ? ` · ${matched.length} from your selection` : ''}`
                               : `of ${matched.length} matched · ${leads.length} total`}
                           </span>
                         </div>
                       </div>
-                      {!selectionMode && matched.length === 0 && (
+                      {!selectionMode && !editMode && matched.length === 0 && (
                         <div className="rounded-md bg-warning/15 px-2 py-1 text-xs font-medium text-warning">
                           No leads match. Loosen filters.
                         </div>
@@ -629,7 +765,7 @@ export function SegmentCreationPanel({
                                     <div>
                                       <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
                                         <Lock className="h-2.5 w-2.5" />
-                                        {lockedLeads.length} locked — outreach in progress, can't move
+                                        {lockedLeads.length} in active outreach. Moving could send duplicate messages.
                                       </div>
                                       <div className="flex flex-wrap gap-1">
                                         {lockedLeads.map((l) => (
@@ -787,7 +923,7 @@ export function SegmentCreationPanel({
                                       )}
                                       title={
                                         isLocked
-                                          ? `Locked: outreach in progress in ${conflict.segment.name}`
+                                          ? `In active outreach via ${conflict.segment.name}. Moving could cause duplicate messages.`
                                           : resolution === 'move'
                                           ? `Will move from ${conflict.segment.name}`
                                           : `Stays in ${conflict.segment.name}`
@@ -1068,10 +1204,17 @@ export function SegmentCreationPanel({
                   Back
                 </Button>
               )}
-              <Button onClick={advance} disabled={!canAdvance()}>
-                {step === 'preview' ? 'Create segment' : 'Continue'}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+              {editMode ? (
+                <Button onClick={handleSave} disabled={!canAdvance()}>
+                  Save changes
+                  <Check className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button onClick={advance} disabled={!canAdvance()}>
+                  {step === 'preview' ? 'Create segment' : 'Continue'}
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
         </div>

@@ -69,6 +69,26 @@ export default function App() {
     );
   };
 
+  const moveLead = (leadId: string, segmentId: string | null) => {
+    setSegments((prev) =>
+      prev.map((seg) => {
+        // First, strip the lead from this segment (we'll add it back to the target below)
+        const without = seg.matchedLeadIds.filter((id) => id !== leadId);
+
+        if (segmentId && seg.id === segmentId) {
+          // Target custom segment receives the lead
+          return { ...seg, matchedLeadIds: Array.from(new Set([...without, leadId])) };
+        }
+        if (segmentId === null && seg.isDefault) {
+          // Unassign: lead goes back to the Default segment
+          return { ...seg, matchedLeadIds: Array.from(new Set([...without, leadId])) };
+        }
+        // Otherwise: lead is removed from this segment
+        return { ...seg, matchedLeadIds: without };
+      }),
+    );
+  };
+
   const addSegment = (s: Omit<Segment, 'id'>, resolution: 'skip' | 'move') => {
     const newSeg: Segment = { ...s, id: `seg-${Date.now()}` };
     setSegments((prev) => {
@@ -93,11 +113,61 @@ export default function App() {
     setSenders((prev) => (prev.length === 0 ? [SAMPLE_SENDER] : prev));
   };
 
+  const launchSegments = (segmentIds: string[]) => {
+    const now = new Date().toISOString();
+    setSegments((prev) =>
+      prev.map((s) =>
+        segmentIds.includes(s.id) && !s.isDefault
+          ? { ...s, status: 'live' as const, launchedAt: s.launchedAt ?? now }
+          : s,
+      ),
+    );
+    // Promote campaign to running if any segment is live
+    setState((curr) => (curr === 'setup' ? 'running' : curr));
+  };
+
+  const pauseSegment = (segmentId: string) => {
+    setSegments((prev) =>
+      prev.map((s) => (s.id === segmentId && !s.isDefault ? { ...s, status: 'paused' as const } : s)),
+    );
+  };
+
+  const resumeSegment = (segmentId: string) => {
+    setSegments((prev) =>
+      prev.map((s) => (s.id === segmentId && !s.isDefault ? { ...s, status: 'live' as const } : s)),
+    );
+  };
+
+  const updateSegment = (segmentId: string, patch: Partial<Segment>) => {
+    setSegments((prev) => prev.map((s) => (s.id === segmentId ? { ...s, ...patch } : s)));
+  };
+
+  const deleteSegment = (segmentId: string) => {
+    setSegments((prev) => prev.filter((s) => s.id !== segmentId));
+  };
+
+  const duplicateSegment = (segmentId: string) => {
+    setSegments((prev) => {
+      const src = prev.find((s) => s.id === segmentId);
+      if (!src) return prev;
+      const copy: Segment = {
+        ...src,
+        id: `seg-${Date.now()}`,
+        name: `${src.name} (copy)`,
+        status: 'draft',
+        launchedAt: undefined,
+        matchedLeadIds: [...src.matchedLeadIds],
+      };
+      return [...prev, copy];
+    });
+  };
+
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <CampaignHeader campaign={campaign} state={state} onChangeState={handleStateChange} />
+        <CampaignHeader campaign={campaign} state={state} segments={segments} onChangeState={handleStateChange} />
         <TabBar
           active={tab}
           onChange={setTab}
@@ -116,8 +186,9 @@ export default function App() {
               initialActiveSegmentId={leadsFilterSegmentId}
               onAddSegment={addSegment}
               onAddLeadsToSegment={addLeadsToSegment}
+              onMoveLead={moveLead}
               onConfigureSenders={() => setTab('settings')}
-              onLaunch={() => handleStateChange('running')}
+              onLaunchSegments={launchSegments}
             />
           )}
           {tab === 'segments' && (
@@ -126,11 +197,20 @@ export default function App() {
               segments={segments}
               sequences={initialSequences}
               senders={senders}
-              state={state}
               onAddSegment={addSegment}
+              onUpdateSegment={updateSegment}
               onJumpToLeads={(segmentId) => {
                 setLeadsFilterSegmentId(segmentId);
                 setTab('leads');
+              }}
+              onLaunchSegment={(id) => launchSegments([id])}
+              onPauseSegment={pauseSegment}
+              onResumeSegment={resumeSegment}
+              onDuplicateSegment={duplicateSegment}
+              onDeleteSegment={(id) => {
+                if (confirm('Delete this segment? Leads will move back to Unassigned.')) {
+                  deleteSegment(id);
+                }
               }}
             />
           )}
@@ -141,6 +221,9 @@ export default function App() {
               sequences={initialSequences}
               onPause={() => handleStateChange('paused')}
               onResume={() => handleStateChange('running')}
+              onLaunchSegment={(id) => launchSegments([id])}
+              onPauseSegment={pauseSegment}
+              onResumeSegment={resumeSegment}
             />
           )}
           {tab === 'analytics' && <AnalyticsView segments={segments} sequences={initialSequences} />}

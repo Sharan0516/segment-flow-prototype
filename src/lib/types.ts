@@ -57,6 +57,8 @@ export interface Sequence {
   locked?: boolean;
 }
 
+export type SegmentStatus = 'draft' | 'live' | 'paused' | 'done';
+
 export interface Segment {
   id: string;
   name: string;
@@ -67,6 +69,10 @@ export interface Segment {
   senderMode: 'campaign-pool' | 'segment-specific';
   segmentSenderIds?: string[];
   matchedLeadIds: string[];
+  /** Per-segment launch state. Default segment ignores this. */
+  status: SegmentStatus;
+  /** When the segment was launched (ISO string). Used for live progress timing. */
+  launchedAt?: string;
   abTest: {
     enabled: boolean;
     variants: Variant[];

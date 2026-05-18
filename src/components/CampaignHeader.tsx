@@ -1,11 +1,12 @@
-import { ChevronLeft, Sparkles, Sun, Bell, Building2, Users, Mail } from 'lucide-react';
+import { ChevronLeft, Sparkles, Sun, Bell, Building2, Users, Mail, Send, MessageSquare, Activity } from 'lucide-react';
 import { Badge } from './ui/Badge';
-import type { Campaign, LifecycleState } from '@/lib/types';
+import type { Campaign, LifecycleState, Segment } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 interface CampaignHeaderProps {
   campaign: Campaign;
   state: LifecycleState;
+  segments: Segment[];
   onChangeState: (state: LifecycleState) => void;
 }
 
@@ -25,7 +26,20 @@ const stateColors: Record<LifecycleState, string> = {
   finished: 'bg-secondary text-secondary-foreground border-border',
 };
 
-export function CampaignHeader({ campaign, state, onChangeState }: CampaignHeaderProps) {
+export function CampaignHeader({ campaign, state, segments, onChangeState }: CampaignHeaderProps) {
+  const liveSegments = segments.filter((s) => !s.isDefault && s.status === 'live');
+  const pausedSegments = segments.filter((s) => !s.isDefault && s.status === 'paused');
+  const draftSegments = segments.filter((s) => !s.isDefault && s.status === 'draft');
+  const inOutreachLeads = [...liveSegments, ...pausedSegments].reduce(
+    (sum, s) => sum + s.matchedLeadIds.length,
+    0,
+  );
+  const showLiveMetrics = liveSegments.length > 0 || pausedSegments.length > 0 || state === 'finished';
+  // Synthetic prototype metrics
+  const sentToday = Math.round(inOutreachLeads * 0.45);
+  const replied = Math.round(sentToday * 0.08);
+  const replyRate = sentToday > 0 ? Math.round((replied / sentToday) * 100) : 0;
+
   return (
     <header className="border-b border-border bg-background">
       <div className="flex items-center justify-between px-6 py-3">
@@ -72,7 +86,7 @@ export function CampaignHeader({ campaign, state, onChangeState }: CampaignHeade
           <h1 className="text-xl font-semibold tracking-tight">{campaign.name}</h1>
           <Badge className={cn('border', stateColors[state])}>{stateLabels[state]}</Badge>
         </div>
-        <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Building2 className="h-3.5 w-3.5" />
             {campaign.companiesCount} companies
@@ -85,7 +99,36 @@ export function CampaignHeader({ campaign, state, onChangeState }: CampaignHeade
           <span className="text-border">•</span>
           <span className="inline-flex items-center gap-1.5">
             <Mail className="h-3.5 w-3.5" />
-            {campaign.inOutreachCount} in outreach
+            <span className="text-foreground">{inOutreachLeads}</span>
+            in outreach
+          </span>
+          {showLiveMetrics && (
+            <>
+              <span className="text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Send className="h-3.5 w-3.5" />
+                <span className="text-foreground">{sentToday}</span>
+                sent today
+              </span>
+              <span className="text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" />
+                <span className="text-foreground">{replyRate}%</span>
+                reply rate
+              </span>
+            </>
+          )}
+          <span className="text-border">•</span>
+          <span className="inline-flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5" />
+            {liveSegments.length > 0 && <span className="text-success">{liveSegments.length} live</span>}
+            {liveSegments.length > 0 && (pausedSegments.length > 0 || draftSegments.length > 0) && <span>·</span>}
+            {pausedSegments.length > 0 && <span className="text-warning">{pausedSegments.length} paused</span>}
+            {pausedSegments.length > 0 && draftSegments.length > 0 && <span>·</span>}
+            {draftSegments.length > 0 && <span>{draftSegments.length} draft</span>}
+            {liveSegments.length === 0 && pausedSegments.length === 0 && draftSegments.length === 0 && (
+              <span>No segments yet</span>
+            )}
           </span>
         </div>
       </div>

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ArrowUpDown } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUpDown, MoreHorizontal, ArrowRightLeft, X, Lock } from 'lucide-react';
 import type { Lead, Segment } from '@/lib/types';
 import { Checkbox } from './ui/Checkbox';
 import { ScoreBadge } from './ScoreBadge';
@@ -13,12 +13,15 @@ interface LeadsTableProps {
   activeSegmentId: string | 'all';
   selectedIds: string[];
   onSelectedChange: (ids: string[]) => void;
+  /** Move a single lead to a segment, or pass null to unassign. */
+  onMoveLead?: (leadId: string, segmentId: string | null) => void;
 }
 
 type SortKey = 'name' | 'score' | 'company';
 type SortDir = 'asc' | 'desc';
 
-export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSelectedChange }: LeadsTableProps) {
+export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSelectedChange, onMoveLead }: LeadsTableProps) {
+  const [menuLeadId, setMenuLeadId] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'score', dir: 'desc' });
   const [filters, setFilters] = useState<Record<string, string[]>>({
     company: [],
@@ -123,6 +126,7 @@ export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSe
                 </button>
               </th>
               <th className="px-3 py-2.5 text-left font-medium">Segment</th>
+              <th className="w-10 px-3 py-2.5" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
@@ -169,6 +173,20 @@ export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSe
                       <span className="text-xs text-muted-foreground">Unassigned</span>
                     )}
                   </td>
+                  <td className="relative px-3 py-3">
+                    <RowMenu
+                      lead={lead}
+                      currentSegment={segment}
+                      segments={segments}
+                      open={menuLeadId === lead.id}
+                      onOpen={() => setMenuLeadId(lead.id)}
+                      onClose={() => setMenuLeadId(null)}
+                      onMove={(segId) => {
+                        onMoveLead?.(lead.id, segId);
+                        setMenuLeadId(null);
+                      }}
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -184,6 +202,106 @@ export function LeadsTable({ leads, segments, activeSegmentId, selectedIds, onSe
           <span>Page 1 of 1</span>
         </span>
       </div>
+    </div>
+  );
+}
+
+function RowMenu({
+  lead,
+  currentSegment,
+  segments,
+  open,
+  onOpen,
+  onClose,
+  onMove,
+}: {
+  lead: Lead;
+  currentSegment?: Segment;
+  segments: Segment[];
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onMove: (segmentId: string | null) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const locked = lead.outreachStarted;
+  const inCustom = currentSegment && !currentSegment.isDefault;
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, onClose]);
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          open ? onClose() : onOpen();
+        }}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        aria-label="Row actions"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-8 z-30 w-56 overflow-hidden rounded-lg border border-border bg-card shadow-2xl">
+          <div className="border-b border-border bg-secondary/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {lead.name}
+          </div>
+
+          {locked ? (
+            <div className="px-3 py-2 text-xs">
+              <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                In active outreach
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                Moving could cause duplicate messages. Pause the segment first to make changes.
+              </div>
+            </div>
+          ) : (
+            <div className="py-1">
+              <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Move to
+              </div>
+              {segments.filter((s) => !s.isDefault).map((seg) => {
+                const isCurrent = currentSegment?.id === seg.id;
+                return (
+                  <button
+                    key={seg.id}
+                    disabled={isCurrent}
+                    onClick={() => onMove(seg.id)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent disabled:opacity-40"
+                  >
+                    <ArrowRightLeft className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-foreground">{seg.name}</span>
+                    {isCurrent && <span className="ml-auto text-[10px] text-muted-foreground">current</span>}
+                  </button>
+                );
+              })}
+
+              {inCustom && (
+                <>
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => onMove(null)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent"
+                  >
+                    <X className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-foreground">Unassign</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
