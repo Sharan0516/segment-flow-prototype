@@ -336,14 +336,12 @@ function OutreachCell({ lead, segment }: { lead: Lead; segment?: Segment }) {
   }
   const currentStep = lead.currentStep ?? 2;
   const totalSteps = 5;
-  const engagement = lead.engagement ?? 'opened';
-  const engagementMeta: Record<string, { dot: string; label: string }> = {
-    opened: { dot: 'bg-success', label: 'Opened' },
-    replied: { dot: 'bg-success', label: 'Replied' },
-    clicked: { dot: 'bg-success', label: 'Clicked' },
-    bounced: { dot: 'bg-destructive-foreground', label: 'Bounced' },
-  };
-  const meta = engagementMeta[engagement] ?? { dot: 'bg-muted-foreground', label: 'Sent' };
+  const engagement = lead.engagement;
+  const meta = engagement === 'replied'
+    ? { dot: 'bg-success', label: 'Replied' }
+    : engagement === 'bounced'
+      ? { dot: 'bg-destructive-foreground', label: 'Bounced' }
+      : { dot: 'bg-muted-foreground', label: 'Sent' };
   return (
     <div className="text-xs">
       <div className="font-medium text-foreground">Step {currentStep} of {totalSteps}</div>

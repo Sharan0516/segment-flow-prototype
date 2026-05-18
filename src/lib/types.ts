@@ -20,7 +20,7 @@ export interface Lead {
   // Runtime-only fields
   currentStep?: number;
   lastActivity?: string;
-  engagement?: 'opened' | 'replied' | 'clicked' | 'bounced' | null;
+  engagement?: 'replied' | 'bounced' | null;
 }
 
 export type SequenceSource = 'use-existing' | 'clone' | 'generate' | 'scratch';

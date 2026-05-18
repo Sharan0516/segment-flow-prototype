@@ -5,9 +5,9 @@ import { TabBar, type TabKey } from '@/components/TabBar';
 import { DemoStateSwitcher, type DemoVariant } from '@/components/DemoStateSwitcher';
 import { SetupView } from '@/views/SetupView';
 import { SegmentsView } from '@/views/SegmentsView';
-import { LiveView } from '@/views/LiveView';
 import { AnalyticsView } from '@/views/AnalyticsView';
-import { SettingsView } from '@/views/SettingsView';
+import { ActivityView } from '@/views/ActivityView';
+import { SendersView } from '@/views/SendersView';
 import {
   campaign as initialCampaign,
   leads as initialLeads,
@@ -41,8 +41,7 @@ export default function App() {
   const handleStateChange = (next: LifecycleState) => {
     setState(next);
     if (next === 'setup') setTab('leads');
-    else if (next === 'running' || next === 'paused' || next === 'partial') setTab('live');
-    else if (next === 'finished') setTab('analytics');
+    else setTab('analytics');
   };
 
   const addLeadsToSegment = (segmentId: string, leadIds: string[]) => {
@@ -191,6 +190,7 @@ export default function App() {
           state={state}
           leadCount={initialLeads.length}
           segmentCount={segments.filter((s) => !s.isDefault).length}
+          senderCount={senders.length}
         />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           {tab === 'leads' && (
@@ -204,7 +204,7 @@ export default function App() {
               onAddSegment={addSegment}
               onAddLeadsToSegment={addLeadsToSegment}
               onMoveLead={moveLead}
-              onConfigureSenders={() => setTab('settings')}
+              onConfigureSenders={() => setTab('senders')}
               onLaunchSegments={launchSegments}
             />
           )}
@@ -231,21 +231,19 @@ export default function App() {
               }}
             />
           )}
-          {tab === 'live' && (
-            <LiveView
+          {tab === 'activity' && <ActivityView />}
+          {tab === 'analytics' && (
+            <AnalyticsView
               state={state}
               segments={segments}
               sequences={initialSequences}
-              onPause={() => handleStateChange('paused')}
-              onResume={() => handleStateChange('running')}
               onLaunchSegment={(id) => launchSegments([id])}
               onPauseSegment={pauseSegment}
               onResumeSegment={resumeSegment}
             />
           )}
-          {tab === 'analytics' && <AnalyticsView segments={segments} sequences={initialSequences} />}
-          {tab === 'settings' && (
-            <SettingsView
+          {tab === 'senders' && (
+            <SendersView
               senders={senders}
               onAddSender={addSender}
               onRemoveSender={(id) => setSenders((prev) => prev.filter((s) => s.id !== id))}

@@ -3,13 +3,13 @@ import type { Sender } from '@/lib/types';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 
-interface SettingsViewProps {
+interface SendersViewProps {
   senders: Sender[];
   onAddSender: () => void;
   onRemoveSender: (id: string) => void;
 }
 
-export function SettingsView({ senders, onAddSender, onRemoveSender }: SettingsViewProps) {
+export function SendersView({ senders, onAddSender, onRemoveSender }: SendersViewProps) {
   return (
     <div className="p-6 space-y-6">
       <div>
