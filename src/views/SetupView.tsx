@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Rocket, Search, Settings2 } from 'lucide-react';
+import { Rocket, Search } from 'lucide-react';
 import type { Lead, LifecycleState, Segment, Sender, Sequence } from '@/lib/types';
 import { ProgressiveDisclosureBar } from '@/components/ProgressiveDisclosureBar';
 import { SenderStatusBar } from '@/components/SenderStatusBar';
 import { FirstRunEducation } from '@/components/FirstRunEducation';
 import { SegmentChips } from '@/components/SegmentChips';
-import { LeadsTable } from '@/components/LeadsTable';
+import { LeadsTable, ColumnsPicker, defaultVisibleColumns, type ColumnId } from '@/components/LeadsTable';
 import { SegmentCreationPanel } from '@/components/SegmentCreationPanel';
 import { SelectionToolbar } from '@/components/SelectionToolbar';
 import { LaunchModal } from '@/components/LaunchModal';
@@ -50,6 +50,7 @@ export function SetupView({
   const [segmentPanelOpen, setSegmentPanelOpen] = useState(false);
   const [panelPresetLeadIds, setPanelPresetLeadIds] = useState<string[] | null>(null);
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(() => defaultVisibleColumns());
 
   const openPanelFromFilters = () => {
     setPanelPresetLeadIds(null);
@@ -125,10 +126,7 @@ export function SetupView({
                 className="h-8 w-64 pl-8 text-xs"
               />
             </div>
-            <Button variant="outline" size="sm">
-              <Settings2 className="h-3.5 w-3.5" />
-              Columns
-            </Button>
+            <ColumnsPicker visible={visibleColumns} onChange={setVisibleColumns} />
             {!selectionActive && (
               <Button
                 onClick={() => setLaunchOpen(true)}
@@ -145,6 +143,7 @@ export function SetupView({
         {selectionActive && (
           <SelectionToolbar
             selectedIds={selectedIds}
+            leads={leads}
             segments={segments}
             blockerText={blockerText}
             onClear={() => setSelectedIds([])}
@@ -161,10 +160,12 @@ export function SetupView({
         <LeadsTable
           leads={filteredLeads}
           segments={segments}
+          sequences={sequences}
           activeSegmentId={activeSegment}
           selectedIds={selectedIds}
           onSelectedChange={setSelectedIds}
           onMoveLead={onMoveLead}
+          visibleColumns={visibleColumns}
         />
       </div>
 
@@ -195,6 +196,7 @@ export function SetupView({
         sequences={sequences}
         senders={senders}
       />
+
     </>
   );
 }

@@ -446,4 +446,17 @@ export const firstRunSegments: Segment[] = [
 // Keep the old export name for any unconverted imports.
 export const initialSegments = configuredSegments;
 
-export const senders: Sender[] = [];
+export const configuredSenders: Sender[] = [
+  { id: 'sender-1', email: 'sharan@lumif.ai', name: 'Sharan JM', status: 'active', dailyCap: 50, sentToday: 0 },
+  { id: 'sender-2', email: 'anoothi@lumif.ai', name: 'Anoothi Kumar', status: 'active', dailyCap: 50, sentToday: 0 },
+  { id: 'sender-3', email: 'careers@lumif.ai', name: 'Careers', status: 'active', dailyCap: 30, sentToday: 0 },
+  { id: 'sender-4', email: 'hello@lumif.ai', name: 'Hello', status: 'paused', dailyCap: 40, sentToday: 0 },
+];
+
+export const firstRunSenders: Sender[] = [];
+
+// Pool used by Settings "Add a mailbox" to cycle through fresh templates.
+export const senderPool: Sender[] = [...configuredSenders];
+
+// Default initial state matches the default demo variant (configured).
+export const senders: Sender[] = configuredSenders;

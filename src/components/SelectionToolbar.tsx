@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Plus, Rocket, ChevronDown, ArrowRightLeft, Check, AlertCircle, ArrowRight } from 'lucide-react';
-import type { Segment } from '@/lib/types';
+import { X, Plus, Rocket, ChevronDown, ArrowRightLeft, Check, AlertCircle, ArrowRight, Lock } from 'lucide-react';
+import type { Lead, Segment } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 interface SelectionToolbarProps {
   selectedIds: string[];
+  leads: Lead[];
   segments: Segment[];
   blockerText: string | null;
   onClear: () => void;
@@ -16,6 +17,7 @@ interface SelectionToolbarProps {
 
 export function SelectionToolbar({
   selectedIds,
+  leads,
   segments,
   blockerText,
   onClear,
@@ -35,6 +37,14 @@ export function SelectionToolbar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
+
+  const lockedIds = useMemo(
+    () => selectedIds.filter((id) => leads.find((l) => l.id === id)?.outreachStarted),
+    [selectedIds, leads],
+  );
+  const lockedCount = lockedIds.length;
+  const allLocked = lockedCount > 0 && lockedCount === selectedIds.length;
+  const movableCount = selectedIds.length - lockedCount;
 
   const composition = useMemo(() => {
     const customSegments = segments.filter((s) => !s.isDefault);
@@ -131,12 +141,25 @@ export function SelectionToolbar({
               <span className="text-warning">{defaultName}</span>
             </span>
           )}
+          {lockedCount > 0 && (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/15 px-1.5 py-0.5 text-warning">
+              <Lock className="h-3 w-3" />
+              <span className="font-medium">{lockedCount}</span>
+              <span>in active outreach (locked)</span>
+            </span>
+          )}
         </span>
       </div>
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        {launchPossible && (
+        {allLocked && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" />
+            All selected are in active outreach. Pause their segment to make changes.
+          </span>
+        )}
+        {!allLocked && launchPossible && (
           <button
             onClick={onLaunch}
             title={launchTooltip}
@@ -146,7 +169,7 @@ export function SelectionToolbar({
             {launchLabel}
           </button>
         )}
-        {organizedButBlocked && (
+        {!allLocked && organizedButBlocked && (
           <button
             onClick={onFixBlocker}
             className="group inline-flex items-center gap-1.5 rounded-lg border border-warning/40 bg-warning/15 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/25"
@@ -157,7 +180,7 @@ export function SelectionToolbar({
           </button>
         )}
 
-        {orgPrimary === 'create' ? (
+        {!allLocked && (orgPrimary === 'create' ? (
           <>
             <button
               onClick={onCreateSegment}
@@ -230,7 +253,7 @@ export function SelectionToolbar({
               Create new
             </button>
           </>
-        )}
+        ))}
 
         <button
           onClick={onClear}

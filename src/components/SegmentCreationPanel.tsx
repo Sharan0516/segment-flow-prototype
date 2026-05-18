@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, ChevronRight, ChevronLeft, Sparkles, Copy, Library, FilePlus2,
   Building2, MapPin, Briefcase, Mail, Award,
-  Check, ArrowRight, AlertTriangle, Lock, ArrowRightLeft, AtSign,
+  Check, ArrowRight, AlertTriangle, AlertCircle, Lock, ArrowRightLeft, AtSign,
 } from 'lucide-react';
 import { LinkedinIcon } from './icons/LinkedinIcon';
 import type { Lead, MessageStep, Segment, Sender, Sequence, SequenceSource } from '@/lib/types';
@@ -319,8 +319,19 @@ export function SegmentCreationPanel({
 
   const currentStepIdx = steps.findIndex((s) => s.key === step);
 
+  const nameError = (() => {
+    const trimmed = name.trim();
+    if (trimmed.length === 0) return null;
+    const dup = existingSegments.find(
+      (s) =>
+        s.id !== editingSegment?.id &&
+        s.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    return dup ? `A segment named "${dup.name}" already exists` : null;
+  })();
+
   const canAdvance = () => {
-    if (step === 'name') return name.trim().length > 0;
+    if (step === 'name') return name.trim().length > 0 && !nameError;
     if (step === 'audience') {
       if (effectiveMatched.length === 0 && conflicts.movable.length === 0) return false;
       if (conflicts.movable.length > 0 && resolution === null) return false;
@@ -478,7 +489,14 @@ export function SegmentCreationPanel({
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g., Senior Leaders, LinkedIn-only, LATAM Region"
+                      className={nameError ? 'border-destructive-foreground focus:ring-destructive-foreground' : undefined}
                     />
+                    {nameError && (
+                      <div className="mt-1.5 flex items-center gap-1 text-xs text-destructive-foreground">
+                        <AlertCircle className="h-3 w-3" />
+                        {nameError}
+                      </div>
+                    )}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {['Senior Leaders', 'LinkedIn-only', 'LATAM Region', 'No email'].map((preset) => (
                         <button

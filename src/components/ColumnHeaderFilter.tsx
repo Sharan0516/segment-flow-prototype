@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, Filter as FilterIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -9,15 +10,61 @@ interface ColumnHeaderFilterProps {
   onChange: (vals: string[]) => void;
 }
 
+const POPOVER_WIDTH = 256;       // matches w-64
+const VIEWPORT_MARGIN = 8;
+const ESTIMATED_POPOVER_HEIGHT = 340; // header + max-h-60 list + footer
+
 export function ColumnHeaderFilter({ label, values, selected, onChange }: ColumnHeaderFilterProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
+  // Compute popover position from trigger rect. Recompute on scroll/resize while open.
+  useEffect(() => {
+    if (!open) return;
+
+    const update = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const r = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      // Horizontal: prefer left-aligned with trigger; flip to right-aligned if overflowing right edge.
+      let left = r.left;
+      if (left + POPOVER_WIDTH + VIEWPORT_MARGIN > vw) {
+        left = Math.max(VIEWPORT_MARGIN, r.right - POPOVER_WIDTH);
+      }
+
+      // Vertical: prefer below trigger; flip above if there isn't room.
+      let top = r.bottom + 4;
+      if (top + ESTIMATED_POPOVER_HEIGHT + VIEWPORT_MARGIN > vh) {
+        const flipped = r.top - ESTIMATED_POPOVER_HEIGHT - 4;
+        if (flipped >= VIEWPORT_MARGIN) top = flipped;
+      }
+
+      setPos({ top, left });
+    };
+
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open]);
+
+  // Outside-click: check both the trigger and the portal-rendered popover.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      const inTrigger = triggerRef.current?.contains(target);
+      const inPopover = popoverRef.current?.contains(target);
+      if (!inTrigger && !inPopover) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -29,8 +76,9 @@ export function ColumnHeaderFilter({ label, values, selected, onChange }: Column
   };
 
   return (
-    <div ref={ref} className="relative inline-flex">
+    <>
       <button
+        ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
         className={cn(
           'inline-flex items-center gap-1 rounded p-0.5 transition-colors',
@@ -41,8 +89,13 @@ export function ColumnHeaderFilter({ label, values, selected, onChange }: Column
         {selected.length > 0 ? <FilterIcon className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {selected.length > 0 && <span className="text-[10px] font-medium">{selected.length}</span>}
       </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded-lg border border-border bg-card shadow-xl">
+
+      {open && pos && createPortal(
+        <div
+          ref={popoverRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: POPOVER_WIDTH }}
+          className="z-50 rounded-lg border border-border bg-card shadow-xl"
+        >
           <div className="border-b border-border p-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
@@ -87,8 +140,9 @@ export function ColumnHeaderFilter({ label, values, selected, onChange }: Column
               </button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }

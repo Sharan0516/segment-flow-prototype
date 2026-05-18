@@ -13,26 +13,19 @@ import {
   leads as initialLeads,
   configuredSegments,
   firstRunSegments,
+  configuredSenders,
+  firstRunSenders,
+  senderPool,
   sequences as initialSequences,
-  senders as initialSenders,
 } from '@/lib/data';
 import type { LifecycleState, Segment, Sender } from '@/lib/types';
-
-const SAMPLE_SENDER: Sender = {
-  id: 'sender-1',
-  email: 'sharan@lumif.ai',
-  name: 'Sharan JM',
-  status: 'active',
-  dailyCap: 50,
-  sentToday: 0,
-};
 
 export default function App() {
   const [state, setState] = useState<LifecycleState>('setup');
   const [tab, setTab] = useState<TabKey>('leads');
   const [demoVariant, setDemoVariant] = useState<DemoVariant>('configured');
   const [segments, setSegments] = useState<Segment[]>(configuredSegments);
-  const [senders, setSenders] = useState<Sender[]>(initialSenders);
+  const [senders, setSenders] = useState<Sender[]>(configuredSenders);
   const [leadsFilterSegmentId, setLeadsFilterSegmentId] = useState<string | 'all'>('all');
 
   const campaign = { ...initialCampaign, state };
@@ -40,6 +33,7 @@ export default function App() {
   const handleDemoVariantChange = (next: DemoVariant) => {
     setDemoVariant(next);
     setSegments(next === 'first-run' ? firstRunSegments : configuredSegments);
+    setSenders(next === 'first-run' ? firstRunSenders : configuredSenders);
     setState('setup');
     setTab('leads');
   };
@@ -52,15 +46,21 @@ export default function App() {
   };
 
   const addLeadsToSegment = (segmentId: string, leadIds: string[]) => {
+    // Active-outreach leads are locked from being reassigned; pause the segment first.
+    const movableIds = leadIds.filter((id) => {
+      const lead = initialLeads.find((l) => l.id === id);
+      return lead && !lead.outreachStarted;
+    });
+    if (movableIds.length === 0) return;
+    const claimSet = new Set(movableIds);
     setSegments((prev) =>
       prev.map((seg) => {
         if (seg.id === segmentId) {
-          const next = new Set([...seg.matchedLeadIds, ...leadIds]);
+          const next = new Set([...seg.matchedLeadIds, ...movableIds]);
           return { ...seg, matchedLeadIds: Array.from(next) };
         }
         // Strip from other custom segments to maintain exclusivity
         if (seg.isDefault) return seg;
-        const claimSet = new Set(leadIds);
         return {
           ...seg,
           matchedLeadIds: seg.matchedLeadIds.filter((id) => !claimSet.has(id)),
@@ -110,7 +110,24 @@ export default function App() {
   };
 
   const addSender = () => {
-    setSenders((prev) => (prev.length === 0 ? [SAMPLE_SENDER] : prev));
+    setSenders((prev) => {
+      const used = new Set(prev.map((s) => s.email));
+      const next = senderPool.find((s) => !used.has(s.email));
+      if (next) return [...prev, next];
+      // Pool exhausted — append a generic mailbox entry so repeated clicks still work in demo.
+      const n = prev.length + 1;
+      return [
+        ...prev,
+        {
+          id: `sender-${Date.now()}`,
+          email: `mailbox-${n}@lumif.ai`,
+          name: `Mailbox ${n}`,
+          status: 'active',
+          dailyCap: 50,
+          sentToday: 0,
+        },
+      ];
+    });
   };
 
   const launchSegments = (segmentIds: string[]) => {
