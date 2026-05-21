@@ -44,7 +44,6 @@ export function SelectionToolbar({
   );
   const lockedCount = lockedIds.length;
   const allLocked = lockedCount > 0 && lockedCount === selectedIds.length;
-  const movableCount = selectedIds.length - lockedCount;
 
   const composition = useMemo(() => {
     const customSegments = segments.filter((s) => !s.isDefault);

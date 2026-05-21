@@ -296,7 +296,6 @@ function buildTrendPoints(
   const points: TrendPoint[] = [];
   // Activity concentrated in the last 7 days, peak ~day 25
   for (let d = 0; d < days; d++) {
-    const t = d / (days - 1);
     const peakDist = Math.abs(d - 25);
     const weight = Math.exp(-Math.pow(peakDist / 4, 2)); // gaussian around day 25
     const emailSent = Math.round(emailTotal * weight * 0.15);
