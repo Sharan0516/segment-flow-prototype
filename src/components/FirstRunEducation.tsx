@@ -31,7 +31,7 @@ export function FirstRunEducation({
 
       <div className="max-w-3xl space-y-3 text-sm leading-relaxed">
         <p className="text-foreground">
-          A <span className="font-semibold text-foreground">segment</span> is a group of leads that gets its own tailored message flow.
+          A <span className="font-semibold text-foreground">segment</span> is a group of leads that gets its own tailored sequence.
           You can group leads by{' '}
           {ATTRIBUTES.map((a, i) => (
             <span key={a}>
@@ -50,8 +50,8 @@ export function FirstRunEducation({
         <div className="flex items-start gap-2 rounded-lg border border-border bg-card/60 p-3">
           <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">The segment is who. The flow is what you say.</span>{' '}
-            Different segments can share the same flow — you only need new copy when you actually want a different angle.
+            <span className="font-medium text-foreground">The segment is who. The sequence is what you say.</span>{' '}
+            Different segments can share the same sequence — you only need new copy when you actually want a different angle.
           </p>
         </div>
       </div>

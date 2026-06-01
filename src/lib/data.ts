@@ -408,7 +408,7 @@ export const configuredSegments: Segment[] = [
     isDefault: false,
     rules: [],
     sequenceId: 'seq-3',
-    sequenceSource: 'clone',
+    sequenceSource: 'use-existing',
     senderMode: 'campaign-pool',
     matchedLeadIds: seniorLeaderLeadIds,
     status: 'draft',

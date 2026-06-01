@@ -23,7 +23,7 @@ export interface Lead {
   engagement?: 'replied' | 'bounced' | null;
 }
 
-export type SequenceSource = 'use-existing' | 'clone' | 'generate' | 'scratch';
+export type SequenceSource = 'use-existing' | 'generate' | 'scratch';
 
 export type StepChannel = 'email' | 'linkedin_connection' | 'linkedin_message';
 

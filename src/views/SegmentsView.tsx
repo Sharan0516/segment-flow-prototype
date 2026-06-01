@@ -94,7 +94,7 @@ export function SegmentsView({
                 <th className="px-4 py-2.5 text-left font-medium">Segment</th>
                 <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-right font-medium">Leads</th>
-                <th className="px-4 py-2.5 text-left font-medium">Message flow</th>
+                <th className="px-4 py-2.5 text-left font-medium">Sequence</th>
                 <th className="px-4 py-2.5 text-left font-medium">Senders</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-right font-medium">Actions</th>

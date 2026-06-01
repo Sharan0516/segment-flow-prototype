@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, ChevronRight, ChevronLeft, Sparkles, Copy, Library, FilePlus2,
+  X, ChevronRight, ChevronLeft, Sparkles, Library, FilePlus2,
   Building2, MapPin, Briefcase, Mail, Award,
   Check, ArrowRight, AlertTriangle, AlertCircle, Lock, ArrowRightLeft, AtSign,
 } from 'lucide-react';
@@ -8,9 +8,11 @@ import { LinkedinIcon } from './icons/LinkedinIcon';
 import type { Lead, MessageStep, Segment, Sender, Sequence, SequenceSource } from '@/lib/types';
 import { Input } from './ui/Input';
 import { ChipInput } from './ui/ChipInput';
+import { SearchableChipInput } from './ui/SearchableChipInput';
 import { Button } from './ui/Button';
 import { Checkbox } from './ui/Checkbox';
 import { MessageStepEditor } from './MessageStepEditor';
+import { AiSequenceBrief, type AiBriefData } from './AiSequenceBrief';
 import { cn } from '@/lib/utils';
 
 interface SegmentCreationPanelProps {
@@ -75,26 +77,20 @@ const sourceOptions: { value: SequenceSource; icon: typeof Library; title: strin
   {
     value: 'use-existing',
     icon: Library,
-    title: 'Use a message flow from the library',
-    subtitle: 'Pick an existing flow. Edits propagate to every campaign using it.',
-  },
-  {
-    value: 'clone',
-    icon: Copy,
-    title: 'Clone a flow and edit',
-    subtitle: 'Copy an existing flow and tweak the steps just for this segment.',
-  },
-  {
-    value: 'generate',
-    icon: Sparkles,
-    title: 'Generate a new flow with AI',
-    subtitle: 'Draft a tailored multi-step message flow for this audience.',
+    title: 'Use Existing Sequence',
+    subtitle: 'Pick a sequence from your library. You can also clone it to customize for this segment.',
   },
   {
     value: 'scratch',
     icon: FilePlus2,
-    title: 'Create a new flow from scratch',
-    subtitle: "Start with a blank flow and write each step yourself.",
+    title: 'Create a New Blank Sequence',
+    subtitle: 'Start from scratch and write each step yourself.',
+  },
+  {
+    value: 'generate',
+    icon: Sparkles,
+    title: 'Generate a Sequence with AI',
+    subtitle: 'Describe your goals and AI drafts a tailored multi-step sequence.',
   },
 ];
 
@@ -115,6 +111,11 @@ export function SegmentCreationPanel({
   const editMode = !!editingSegment;
   const audienceLocked = editMode && editingSegment.status !== 'draft';
 
+  const companySuggestions = useMemo(
+    () => [...new Set(leads.map((l) => l.company))].sort(),
+    [leads],
+  );
+
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
   const [sequenceSource, setSequenceSource] = useState<SequenceSource | null>(null);
@@ -124,8 +125,18 @@ export function SegmentCreationPanel({
   const [messageSteps, setMessageSteps] = useState<MessageStep[]>([]);
   const [previewLeadId, setPreviewLeadId] = useState<string | null>(null);
   const [resolution, setResolution] = useState<'skip' | 'move' | null>(null);
+  const [showConflictNames, setShowConflictNames] = useState(false);
   const [senderMode, setSenderMode] = useState<'campaign-pool' | 'segment-specific'>('campaign-pool');
   const [segmentSenderIds, setSegmentSenderIds] = useState<string[]>([]);
+
+  const [aiBrief, setAiBrief] = useState<AiBriefData>({
+    valueProp: '',
+    tone: '',
+    channel: '',
+    stepCount: '',
+  });
+  const [aiGenerated, setAiGenerated] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
 
   // When entering edit mode (or switching segments to edit), pre-fill all fields.
   // When opening in create mode, reset state so leftover values from a previous
@@ -154,6 +165,9 @@ export function SegmentCreationPanel({
       setFilter(emptyFilter);
       setResolution(null);
       setPreviewLeadId(null);
+      setAiBrief({ valueProp: '', tone: '', channel: '', stepCount: '' });
+      setAiGenerated(false);
+      setAiGenerating(false);
       setStep('name');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,37 +200,25 @@ export function SegmentCreationPanel({
           charLimit: 300,
         },
       ]);
-    } else if (sequenceSource === 'generate') {
-      // AI generation: leave empty, will draft on save
+    } else if (sequenceSource === 'generate' && !aiGenerated) {
       setMessageSteps([]);
-    } else if ((sequenceSource === 'use-existing' || sequenceSource === 'clone') && selectedSequence?.messageSteps) {
-      // Use existing: live link, but show the steps for preview
-      // Clone: deep copy with new IDs so edits don't propagate
-      const ms = selectedSequence.messageSteps;
-      setMessageSteps(
-        sequenceSource === 'clone'
-          ? ms.map((s, i) => ({ ...s, id: `step-clone-${Date.now()}-${i}` }))
-          : ms.map((s) => ({ ...s })),
-      );
+    } else if (sequenceSource === 'use-existing' && selectedSequence?.messageSteps) {
+      setMessageSteps(selectedSequence.messageSteps.map((s) => ({ ...s })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sequenceSource, sequenceId]);
 
   const matched = useMemo(() => {
-    if (selectionMode) {
-      const idSet = new Set(presetLeadIds!);
-      // Preserve the user's selection order
-      return presetLeadIds!.map((id) => leads.find((l) => l.id === id)).filter((l): l is Lead => !!l && idSet.has(l.id));
-    }
     if (editMode && editingSegment) {
-      // In edit mode: show the segment's current members as the locked audience
       const idSet = new Set(editingSegment.matchedLeadIds);
       return editingSegment.matchedLeadIds
         .map((id) => leads.find((l) => l.id === id))
         .filter((l): l is Lead => !!l && idSet.has(l.id));
     }
-    return leads.filter((l) => {
-      // title: OR within field, AND across fields
+    const baseLeads = selectionMode
+      ? presetLeadIds!.map((id) => leads.find((l) => l.id === id)).filter((l): l is Lead => !!l)
+      : leads;
+    return baseLeads.filter((l) => {
       if (filter.title.length) {
         const lc = l.title.toLowerCase();
         const matchesAny = filter.title.some((kw) => lc.includes(kw.toLowerCase()));
@@ -307,12 +309,55 @@ export function SegmentCreationPanel({
     return map;
   }, [conflicts]);
 
+  const generateAiSteps = () => {
+    setAiGenerating(true);
+    const count = parseInt(aiBrief.stepCount) || 3;
+    const ch = aiBrief.channel;
+    const angle = aiBrief.valueProp;
+    const dayGaps = count <= 2 ? [0, 4] : count === 3 ? [0, 3, 7] : count === 4 ? [0, 2, 5, 9] : [0, 2, 4, 7, 11];
+
+    const emailBody = (i: number) => {
+      if (i === 0)
+        return `Hi {{first_name}},\n\n${angle}\n\nAt ${name || 'our company'}, we help teams like yours tackle this head-on. Would love to share how.\n\nFree for a quick chat this week?\n\nBest regards`;
+      if (i === 1)
+        return `Hi {{first_name}},\n\nJust bumping this up. Wanted to see if ${angle.toLowerCase().slice(0, 60)}... resonates with what you're seeing at {{company}}.\n\nHappy to share a one-pager if useful.\n\nBest,`;
+      return `Hi {{first_name}},\n\nLast note from me. If this isn't on your radar this quarter, totally understand. Happy to reconnect when timing is better.\n\nBest,`;
+    };
+    const linkedinBody = (i: number) => {
+      if (i === 0)
+        return `Hi {{first_name}}, came across your work at {{company}}. Would love to connect.`;
+      return `Hi {{first_name}}, thanks for connecting. Quick question: ${angle.toLowerCase().slice(0, 80)}... is this something you're seeing at {{company}}?`;
+    };
+
+    const steps: MessageStep[] = [];
+    for (let i = 0; i < count; i++) {
+      const day = dayGaps[i] ?? i * 3;
+      if (ch === 'email') {
+        steps.push({ id: `ai-${Date.now()}-${i}`, channel: 'email', dayOffset: day, subject: i === 0 ? angle.slice(0, 60) : i === 1 ? `Re: ${angle.slice(0, 50)}` : 'Closing the loop', body: emailBody(i), aiGenerated: true });
+      } else if (ch === 'linkedin') {
+        steps.push({ id: `ai-${Date.now()}-${i}`, channel: i === 0 ? 'linkedin_connection' : 'linkedin_message', dayOffset: day, body: linkedinBody(i), aiGenerated: true });
+      } else {
+        if (i === 0) steps.push({ id: `ai-${Date.now()}-${i}`, channel: 'email', dayOffset: day, subject: angle.slice(0, 60), body: emailBody(0), aiGenerated: true });
+        else if (i === count - 1) steps.push({ id: `ai-${Date.now()}-${i}`, channel: 'linkedin_message', dayOffset: day, body: linkedinBody(1), aiGenerated: true });
+        else if (i === 1 && count >= 4) steps.push({ id: `ai-${Date.now()}-${i}`, channel: 'email', dayOffset: day, subject: `Re: ${angle.slice(0, 50)}`, body: emailBody(1), aiGenerated: true });
+        else if (i === 2 && count >= 4) steps.push({ id: `ai-${Date.now()}-${i}`, channel: 'linkedin_connection', dayOffset: day, body: linkedinBody(0), aiGenerated: true });
+        else steps.push({ id: `ai-${Date.now()}-${i}`, channel: i % 2 === 0 ? 'email' : 'linkedin_message', dayOffset: day, subject: i % 2 === 0 ? `Re: ${angle.slice(0, 50)}` : undefined, body: i % 2 === 0 ? emailBody(Math.min(i, 2)) : linkedinBody(1), aiGenerated: true });
+      }
+    }
+
+    setTimeout(() => {
+      setMessageSteps(steps);
+      setAiGenerating(false);
+      setAiGenerated(true);
+    }, 1200);
+  };
+
   if (!open) return null;
 
   const steps: { key: Step; label: string }[] = [
     { key: 'name', label: 'Name' },
     { key: 'audience', label: 'Audience' },
-    { key: 'message', label: 'Message' },
+    { key: 'message', label: 'Sequence' },
     { key: 'senders', label: 'Senders' },
     { key: 'preview', label: 'Preview' },
   ];
@@ -339,7 +384,7 @@ export function SegmentCreationPanel({
     }
     if (step === 'message') {
       if (sequenceSource === null) return false;
-      if (sequenceSource === 'generate') return true;
+      if (sequenceSource === 'generate') return aiGenerated && messageSteps.length > 0 && messageSteps.every((s) => s.body.trim().length > 0);
       if (sequenceSource === 'scratch') return messageSteps.length > 0 && messageSteps.every((s) => s.body.trim().length > 0);
       return !!sequenceId;
     }
@@ -405,6 +450,9 @@ export function SegmentCreationPanel({
     setFilter(emptyFilter);
     setMessageSteps([]);
     setPreviewLeadId(null);
+    setAiBrief({ valueProp: '', tone: '', channel: '', stepCount: '' });
+    setAiGenerated(false);
+    setAiGenerating(false);
     onClose();
   };
 
@@ -515,8 +563,8 @@ export function SegmentCreationPanel({
 
             {step === 'audience' && (
               <>
-                {/* Filters column — hidden in selection mode and edit mode */}
-                {!selectionMode && !editMode && (
+                {/* Filters column — hidden in edit mode when audience is locked */}
+                {!editMode && (
                 <div className="w-[340px] shrink-0 overflow-y-auto border-r border-border p-6 scrollbar-thin">
                   <div className="space-y-5">
                     <div>
@@ -577,13 +625,14 @@ export function SegmentCreationPanel({
 
                     <FilterField
                       icon={Building2}
-                      label="Company name contains"
-                      hint={filter.companyName.length > 1 ? `Any of ${filter.companyName.length} keywords` : 'Free-text search, separate with Enter or comma'}
+                      label="Company"
+                      hint={filter.companyName.length > 0 ? `${filter.companyName.length} selected` : 'Search and select companies'}
                     >
-                      <ChipInput
+                      <SearchableChipInput
                         values={filter.companyName}
                         onChange={(v) => setFilter({ ...filter, companyName: v })}
-                        placeholder="e.g., Pharma, Aspen, Novartis"
+                        suggestions={companySuggestions}
+                        placeholder="Search companies..."
                       />
                     </FilterField>
 
@@ -752,51 +801,57 @@ export function SegmentCreationPanel({
                                     From <span className="text-foreground">{segment.name}</span>
                                   </div>
 
-                                  {movableLeads.length > 0 && (
-                                    <div className="mb-2">
-                                      <div className="mb-1 text-[11px] font-medium text-foreground">
-                                        {movableLeads.length} can move
-                                      </div>
-                                      <div className="flex flex-wrap gap-1">
-                                        {movableLeads.map((l) => (
-                                          <span
-                                            key={l.id}
-                                            className={cn(
-                                              'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
-                                              resolution === 'move'
-                                                ? 'border-primary/40 bg-primary/10 text-primary'
-                                                : resolution === 'skip'
-                                                ? 'border-border bg-secondary text-muted-foreground line-through opacity-60'
-                                                : 'border-border bg-background text-foreground',
-                                            )}
-                                            title={l.title}
-                                          >
-                                            {resolution === 'move' && <ArrowRightLeft className="h-2.5 w-2.5" />}
-                                            {l.name}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {lockedLeads.length > 0 && (
-                                    <div>
-                                      <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                                    {movableLeads.length > 0 && (
+                                      <span className="font-medium text-foreground">{movableLeads.length} can move</span>
+                                    )}
+                                    {movableLeads.length > 0 && lockedLeads.length > 0 && (
+                                      <span className="text-muted-foreground/40">&middot;</span>
+                                    )}
+                                    {lockedLeads.length > 0 && (
+                                      <span className="inline-flex items-center gap-1 font-medium text-muted-foreground">
                                         <Lock className="h-2.5 w-2.5" />
-                                        {lockedLeads.length} in active outreach. Moving could send duplicate messages.
-                                      </div>
-                                      <div className="flex flex-wrap gap-1">
-                                        {lockedLeads.map((l) => (
-                                          <span
-                                            key={l.id}
-                                            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                                            title={l.title}
-                                          >
-                                            <Lock className="h-2.5 w-2.5" />
-                                            {l.name}
-                                          </span>
-                                        ))}
-                                      </div>
+                                        {lockedLeads.length} locked
+                                      </span>
+                                    )}
+                                    <span className="text-muted-foreground/40">&middot;</span>
+                                    <button
+                                      onClick={() => setShowConflictNames((v) => !v)}
+                                      className="font-medium text-primary hover:underline"
+                                    >
+                                      {showConflictNames ? 'Hide' : 'Show names'}
+                                    </button>
+                                  </div>
+
+                                  {showConflictNames && (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {movableLeads.map((l) => (
+                                        <span
+                                          key={l.id}
+                                          className={cn(
+                                            'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
+                                            resolution === 'move'
+                                              ? 'border-primary/40 bg-primary/10 text-primary'
+                                              : resolution === 'skip'
+                                              ? 'border-border bg-secondary text-muted-foreground line-through opacity-60'
+                                              : 'border-border bg-background text-foreground',
+                                          )}
+                                          title={l.title}
+                                        >
+                                          {resolution === 'move' && <ArrowRightLeft className="h-2.5 w-2.5" />}
+                                          {l.name}
+                                        </span>
+                                      ))}
+                                      {lockedLeads.map((l) => (
+                                        <span
+                                          key={l.id}
+                                          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                                          title={l.title}
+                                        >
+                                          <Lock className="h-2.5 w-2.5" />
+                                          {l.name}
+                                        </span>
+                                      ))}
                                     </div>
                                   )}
                                 </div>
@@ -837,7 +892,12 @@ export function SegmentCreationPanel({
                                     )}
                                   >
                                     <div className="flex w-full items-center justify-between">
-                                      <span className="text-sm font-semibold text-foreground">Skip them</span>
+                                      <span className="text-sm font-semibold text-foreground">
+                                        Skip them{' '}
+                                        <span className="text-xs font-medium text-muted-foreground">
+                                          &middot; {matched.length - conflicts.movable.length - conflicts.locked.length} leads
+                                        </span>
+                                      </span>
                                       {resolution === 'skip' && (
                                         <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary">
                                           <Check className="h-2.5 w-2.5 text-primary-foreground" />
@@ -860,7 +920,10 @@ export function SegmentCreationPanel({
                                     <div className="flex w-full items-center justify-between">
                                       <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
                                         <ArrowRightLeft className="h-3.5 w-3.5" />
-                                        Move {conflicts.movable.length} here
+                                        Move {conflicts.movable.length} here{' '}
+                                        <span className="text-xs font-medium text-muted-foreground">
+                                          &middot; {matched.length - conflicts.locked.length} leads
+                                        </span>
                                       </span>
                                       {resolution === 'move' && (
                                         <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary">
@@ -983,9 +1046,9 @@ export function SegmentCreationPanel({
                   <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
                     <div className="mx-auto max-w-2xl space-y-6">
                       <div>
-                        <h3 className="text-base font-semibold text-foreground">What messages should this segment receive?</h3>
+                        <h3 className="text-base font-semibold text-foreground">What sequence should this segment receive?</h3>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          A <span className="text-foreground">message flow</span> is the multi-step outreach (your library calls these "Sequences"). Pick where it comes from.
+                          A <span className="text-foreground">sequence</span> is the multi-step outreach this segment will get. Pick where it comes from.
                         </p>
                       </div>
 
@@ -1016,13 +1079,12 @@ export function SegmentCreationPanel({
                       </div>
                     </div>
                   </div>
-                ) : (sequenceSource === 'use-existing' || sequenceSource === 'clone') && !sequenceId ? (
-                  // Pick which existing flow
+                ) : sequenceSource === 'use-existing' && !sequenceId ? (
                   <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
                     <div className="mx-auto max-w-2xl space-y-4">
                       <div className="flex items-center justify-between">
                         <h3 className="text-base font-semibold text-foreground">
-                          {sequenceSource === 'clone' ? 'Flow to clone from' : 'Flow to use'}
+                          Choose a sequence
                         </h3>
                         <button
                           onClick={() => setSequenceSource(null)}
@@ -1051,50 +1113,62 @@ export function SegmentCreationPanel({
                       </div>
                     </div>
                   </div>
-                ) : sequenceSource === 'generate' ? (
-                  <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
-                    <div className="mx-auto max-w-2xl space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-base font-semibold text-foreground">AI-generated flow</h3>
-                        <button onClick={() => setSequenceSource(null)} className="text-xs text-muted-foreground hover:text-foreground">
-                          Change source
-                        </button>
-                      </div>
-                      <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-                        <div className="flex items-start gap-3">
-                          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
-                          <div>
-                            <div className="text-sm font-medium text-foreground">A tailored flow will be drafted</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              Using the {effectiveMatched.length} leads in this segment and the campaign plan, Copilot drafts a multi-step flow. You can review and edit each step before launch.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  // sequenceSource is scratch, or sequenceId is set: show the two-pane editor
-                  <>
-                    <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">
-                          {sequenceSource === 'scratch'
-                            ? `${name || 'New flow'} (from scratch)`
-                            : sequenceSource === 'clone'
-                            ? `Clone of: ${selectedSequence?.name ?? ''}`
-                            : selectedSequence?.name}
-                        </span>
-                      </div>
+                ) : sequenceSource === 'generate' && !aiGenerated ? (
+                  <div className="flex flex-1 flex-col overflow-hidden">
+                    <div className="flex shrink-0 items-center justify-end border-b border-border bg-card/50 px-4 py-1.5">
                       <button
                         onClick={() => {
                           setSequenceSource(null);
-                          setSequenceId('');
-                          setMessageSteps([]);
+                          setAiBrief({ valueProp: '', tone: '', channel: '', stepCount: '' });
+                          setAiGenerated(false);
+                          setAiGenerating(false);
                         }}
                         className="text-xs text-muted-foreground hover:text-foreground"
                       >
                         Change source
+                      </button>
+                    </div>
+                    <AiSequenceBrief
+                      brief={aiBrief}
+                      onChange={setAiBrief}
+                      leads={effectiveMatched}
+                      segmentName={name}
+                      onGenerate={generateAiSteps}
+                      generating={aiGenerating}
+                    />
+                  </div>
+                ) : (
+                  // sequenceSource is scratch, use-existing, or generate (after AI generation): show the two-pane editor
+                  <>
+                    <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {sequenceSource === 'generate'
+                            ? `${name || 'New sequence'} (AI-generated)`
+                            : sequenceSource === 'scratch'
+                            ? `${name || 'New sequence'} (from scratch)`
+                            : selectedSequence?.name}
+                        </span>
+                        {sequenceSource === 'generate' && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                            <Sparkles className="h-2.5 w-2.5" /> AI
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (sequenceSource === 'generate') {
+                            setAiGenerated(false);
+                            setMessageSteps([]);
+                          } else {
+                            setSequenceSource(null);
+                            setSequenceId('');
+                            setMessageSteps([]);
+                          }
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        {sequenceSource === 'generate' ? 'Edit brief' : 'Change source'}
                       </button>
                     </div>
                     <div className="flex-1 overflow-hidden">
@@ -1168,13 +1242,13 @@ export function SegmentCreationPanel({
                         }`}
                       />
                       <ReviewRow
-                        label="Messaging"
+                        label="Sequence"
                         value={
                           sequenceSource === 'generate'
-                            ? 'AI-generated (will draft on save)'
+                            ? `AI-generated · ${messageSteps.length} step${messageSteps.length === 1 ? '' : 's'}`
                             : sequenceSource === 'scratch'
-                            ? `Custom flow · ${messageSteps.length} step${messageSteps.length === 1 ? '' : 's'}`
-                            : `${sequenceSource === 'clone' ? 'Cloned from' : 'Linked to'}: ${
+                            ? `New sequence · ${messageSteps.length} step${messageSteps.length === 1 ? '' : 's'}`
+                            : `Linked to: ${
                                 sequences.find((s) => s.id === sequenceId)?.name
                               }`
                         }
@@ -1184,8 +1258,6 @@ export function SegmentCreationPanel({
                         value={
                           messageSteps.length > 0
                             ? `${messageSteps.length} · ${messageSteps[messageSteps.length - 1].dayOffset} day${messageSteps[messageSteps.length - 1].dayOffset === 1 ? '' : 's'} total`
-                            : sequenceSource === 'generate'
-                            ? 'Will be drafted on save'
                             : '—'
                         }
                       />
