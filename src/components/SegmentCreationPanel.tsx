@@ -8,6 +8,7 @@ import { LinkedinIcon } from './icons/LinkedinIcon';
 import type { Lead, MessageStep, Segment, Sender, Sequence, SequenceSource } from '@/lib/types';
 import { Input } from './ui/Input';
 import { ChipInput } from './ui/ChipInput';
+import { TitleMultiSelect } from './ui/TitleMultiSelect';
 import { SearchableChipInput } from './ui/SearchableChipInput';
 import { Button } from './ui/Button';
 import { Checkbox } from './ui/Checkbox';
@@ -115,6 +116,18 @@ export function SegmentCreationPanel({
     () => [...new Set(leads.map((l) => l.company))].sort(),
     [leads],
   );
+
+  // Distinct job titles in the lead pool with their lead counts, busiest first.
+  const titleOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of leads) {
+      const t = l.title.trim();
+      if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  }, [leads]);
 
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
@@ -579,10 +592,11 @@ export function SegmentCreationPanel({
                       label="Job title contains"
                       hint={filter.title.length > 1 ? `Any of ${filter.title.length} keywords` : 'Press Enter or comma to add'}
                     >
-                      <ChipInput
+                      <TitleMultiSelect
                         values={filter.title}
                         onChange={(v) => setFilter({ ...filter, title: v })}
-                        placeholder="e.g., CFO, VP, Director"
+                        options={titleOptions}
+                        placeholder="Search job titles, e.g. VP, Director"
                       />
                     </FilterField>
 
